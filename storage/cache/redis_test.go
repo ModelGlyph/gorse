@@ -15,10 +15,15 @@
 package cache
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"math"
+	"net"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -224,6 +229,179 @@ func TestEncodeDecodeCategories(t *testing.T) {
 	decoded, err = decodeCategories(encoded)
 	assert.NoError(t, err)
 	assert.Equal(t, []string{}, decoded)
+}
+
+func TestDecodeRedisScoreTuple(t *testing.T) {
+	timestamp := time.Date(2026, 9, 19, 1, 2, 3, 456000000, time.UTC)
+	document, found, err := decodeRedisScoreTuple("collection", "subset", "item", []any{
+		"collection", "subset", "item", "0", "0", encodeCategories([]string{"work"}), strconv.FormatInt(timestamp.UnixMicro(), 10),
+	})
+	assert.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, Score{Id: "item", Score: 0, Categories: []string{"work"}, Timestamp: timestamp}, document)
+
+	_, found, err = decodeRedisScoreTuple("collection", "subset", "missing", []any{nil, nil, nil, nil, nil, nil, nil})
+	assert.NoError(t, err)
+	assert.False(t, found)
+
+	_, found, err = decodeRedisScoreTuple("collection", "subset", "hidden", []any{
+		"collection", "subset", "hidden", "1", "1", encodeCategories(nil), strconv.FormatInt(timestamp.UnixMicro(), 10),
+	})
+	assert.NoError(t, err)
+	assert.False(t, found)
+
+	_, _, err = decodeRedisScoreTuple("collection", "subset", "item", []any{"collection"})
+	assert.Error(t, err)
+	_, _, err = decodeRedisScoreTuple("collection", "subset", "item", []any{
+		"other", "subset", "item", "1", "0", encodeCategories(nil), strconv.FormatInt(timestamp.UnixMicro(), 10),
+	})
+	assert.Error(t, err)
+	_, _, err = decodeRedisScoreTuple("collection", "subset", "item", []any{
+		"collection", "subset", "item", nil, "0", encodeCategories(nil), strconv.FormatInt(timestamp.UnixMicro(), 10),
+	})
+	assert.Error(t, err)
+}
+
+func TestRedisOpenEnablesContextTimeout(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "standalone", path: "redis://127.0.0.1:6379"},
+		{name: "cluster", path: "redis+cluster://127.0.0.1:6379?addr=127.0.0.1:6380"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			database, err := Open(test.path, "gorse_")
+			assert.NoError(t, err)
+			if err != nil {
+				return
+			}
+			defer database.Close()
+			redisDatabase := database.(*Redis)
+			switch client := redisDatabase.client.(type) {
+			case *redis.Client:
+				assert.True(t, client.Options().ContextTimeoutEnabled)
+			case *redis.ClusterClient:
+				assert.True(t, client.Options().ContextTimeoutEnabled)
+			default:
+				t.Fatalf("unexpected redis client type %T", client)
+			}
+		})
+	}
+}
+
+func TestRedisGetScoresRespectsDeadlineAfterRequest(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	releaseServer := make(chan struct{})
+	requestReceived := make(chan struct{})
+	serverResult := make(chan error, 1)
+	defer close(releaseServer)
+	defer serverConn.Close()
+
+	go func() {
+		reader := bufio.NewReader(serverConn)
+		command, err := readRESPCommand(reader)
+		if err != nil {
+			serverResult <- err
+			return
+		}
+		if len(command) == 0 || !strings.EqualFold(command[0], "hello") {
+			serverResult <- fmt.Errorf("unexpected handshake command %q", command)
+			return
+		}
+		if _, err = io.WriteString(serverConn, "-ERR unknown command 'hello'\r\n"); err != nil {
+			serverResult <- err
+			return
+		}
+		command, err = readRESPCommand(reader)
+		if err != nil {
+			serverResult <- err
+			return
+		}
+		if len(command) == 0 || !strings.EqualFold(command[0], "hmget") {
+			serverResult <- fmt.Errorf("unexpected score command %q", command)
+			return
+		}
+		close(requestReceived)
+		<-releaseServer
+		serverResult <- nil
+	}()
+
+	client := redis.NewClient(&redis.Options{
+		Dialer: func(context.Context, string, string) (net.Conn, error) {
+			return clientConn, nil
+		},
+		Protocol:              2,
+		ContextTimeoutEnabled: true,
+		DisableIdentity:       true,
+		MaxRetries:            -1,
+	})
+	defer client.Close()
+	database := &Redis{TablePrefix: "gorse_", client: client}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, err := database.GetScores(ctx, "collection", "subset", []string{"item"})
+		result <- err
+	}()
+
+	select {
+	case <-requestReceived:
+	case err := <-serverResult:
+		t.Fatalf("fake redis failed before receiving HMGET: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("HMGET was not sent")
+	}
+	select {
+	case err := <-result:
+		var timeoutError net.Error
+		assert.ErrorAs(t, err, &timeoutError)
+		assert.True(t, timeoutError.Timeout())
+		assert.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
+	case <-time.After(time.Second):
+		t.Fatal("GetScores ignored the context deadline after sending HMGET")
+	}
+}
+
+func readRESPCommand(reader *bufio.Reader) ([]string, error) {
+	header, err := reader.ReadString('\n')
+	if err != nil {
+		return nil, err
+	}
+	header = strings.TrimSpace(header)
+	if len(header) < 2 || header[0] != '*' {
+		return nil, fmt.Errorf("invalid RESP array header %q", header)
+	}
+	count, err := strconv.Atoi(header[1:])
+	if err != nil {
+		return nil, err
+	}
+	command := make([]string, count)
+	for i := range count {
+		bulkHeader, err := reader.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+		bulkHeader = strings.TrimSpace(bulkHeader)
+		if len(bulkHeader) < 2 || bulkHeader[0] != '$' {
+			return nil, fmt.Errorf("invalid RESP bulk header %q", bulkHeader)
+		}
+		size, err := strconv.Atoi(bulkHeader[1:])
+		if err != nil {
+			return nil, err
+		}
+		value := make([]byte, size+2)
+		if _, err = io.ReadFull(reader, value); err != nil {
+			return nil, err
+		}
+		if value[size] != '\r' || value[size+1] != '\n' {
+			return nil, fmt.Errorf("invalid RESP bulk terminator")
+		}
+		command[i] = string(value[:size])
+	}
+	return command, nil
 }
 
 func BenchmarkRedis(b *testing.B) {

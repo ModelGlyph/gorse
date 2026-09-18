@@ -216,6 +216,36 @@ func (m MongoDB) AddScores(ctx context.Context, collection, subset string, docum
 	return errors.WithStack(err)
 }
 
+func (m MongoDB) GetScores(ctx context.Context, collection, subset string, ids []string) ([]Score, error) {
+	if len(ids) == 0 {
+		return []Score{}, nil
+	}
+	filter := bson.M{
+		"collection": collection,
+		"subset":     subset,
+		"is_hidden":  false,
+		"id":         bson.M{"$in": ids},
+	}
+	cur, err := m.client.Database(m.dbName).Collection(m.DocumentTable()).Find(ctx, filter)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	defer cur.Close(ctx)
+	documents := make([]Score, 0, len(ids))
+	for cur.Next(ctx) {
+		var document Score
+		if err = cur.Decode(&document); err != nil {
+			return nil, errors.WithStack(err)
+		}
+		document.Timestamp = document.Timestamp.In(time.UTC)
+		documents = append(documents, document)
+	}
+	if err = cur.Err(); err != nil {
+		return nil, errors.WithStack(err)
+	}
+	return documents, nil
+}
+
 func (m MongoDB) SearchScores(ctx context.Context, collection, subset string, query []string, begin, end int) ([]Score, error) {
 	opt := options.Find().SetSkip(int64(begin)).SetSort(bson.M{"score": -1})
 	if end != -1 {

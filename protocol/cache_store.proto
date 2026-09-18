@@ -74,6 +74,14 @@ message AddScoresRequest {
 
 message AddScoresResponse {}
 
+message GetScoresRequest {
+  string collection = 1;
+  string subset = 2;
+  repeated string ids = 3;
+}
+
+message GetScoresResponse { repeated Score documents = 1; }
+
 message SearchScoresRequest {
   string collection = 1;
   string subset = 2;
@@ -128,6 +136,7 @@ service CacheStore {
   rpc Set(SetRequest) returns (SetResponse) {}
   rpc Delete(DeleteRequest) returns (DeleteResponse) {}
   rpc AddScores(AddScoresRequest) returns (AddScoresResponse) {}
+  rpc GetScores(GetScoresRequest) returns (GetScoresResponse) {}
   rpc SearchScores(SearchScoresRequest) returns (SearchScoresResponse) {}
   rpc DeleteScores(DeleteScoresRequest) returns (DeleteScoresResponse) {}
   rpc UpdateScores(UpdateScoresRequest) returns (UpdateScoresResponse) {}

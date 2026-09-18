@@ -347,6 +347,45 @@ func (db *SQLDatabase) AddScores(ctx context.Context, collection, subset string,
 	return errors.WithStack(err)
 }
 
+func (db *SQLDatabase) GetScores(ctx context.Context, collection, subset string, ids []string) ([]Score, error) {
+	if len(ids) == 0 {
+		return []Score{}, nil
+	}
+	tx := db.gormDB.WithContext(ctx).
+		Table(db.DocumentTable()).
+		Where("collection = ? and subset = ? and is_hidden = false and id in ?", collection, subset, ids)
+	switch db.driver {
+	case Postgres:
+		var rows []PostgresDocument
+		if err := tx.Find(&rows).Error; err != nil {
+			return nil, errors.WithStack(err)
+		}
+		return lo.Map(rows, func(row PostgresDocument, _ int) Score {
+			return Score{
+				Id:         row.Id,
+				Score:      row.Score,
+				Categories: row.Categories,
+				Timestamp:  row.Timestamp.In(time.UTC),
+			}
+		}), nil
+	case SQLite, MySQL:
+		var rows []SQLDocument
+		if err := tx.Find(&rows).Error; err != nil {
+			return nil, errors.WithStack(err)
+		}
+		return lo.Map(rows, func(row SQLDocument, _ int) Score {
+			return Score{
+				Id:         row.Id,
+				Score:      row.Score,
+				Categories: row.Categories,
+				Timestamp:  row.Timestamp.In(time.UTC),
+			}
+		}), nil
+	default:
+		return nil, errors.Errorf("unsupported SQL driver: %d", db.driver)
+	}
+}
+
 func (db *SQLDatabase) SearchScores(ctx context.Context, collection, subset string, query []string, begin, end int) ([]Score, error) {
 	tx := db.gormDB.WithContext(ctx).
 		Model(&PostgresDocument{}).

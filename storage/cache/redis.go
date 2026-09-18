@@ -40,6 +40,7 @@ func init() {
 			return nil, err
 		}
 		opt.Protocol = 2
+		opt.ContextTimeoutEnabled = true
 		option := storage.NewOptions(opts...)
 		if option.RedisClientName != "" {
 			opt.ClientName = option.RedisClientName
@@ -66,6 +67,7 @@ func init() {
 			return nil, err
 		}
 		opt.Protocol = 2
+		opt.ContextTimeoutEnabled = true
 		option := storage.NewOptions(opts...)
 		if option.RedisClientName != "" {
 			opt.ClientName = option.RedisClientName
@@ -251,6 +253,89 @@ func (r *Redis) AddScores(ctx context.Context, collection, subset string, docume
 	}
 	_, err := p.Exec(ctx)
 	return errors.WithStack(err)
+}
+
+func (r *Redis) GetScores(ctx context.Context, collection, subset string, ids []string) ([]Score, error) {
+	if len(ids) == 0 {
+		return []Score{}, nil
+	}
+	p := r.client.Pipeline()
+	commands := make([]*redis.SliceCmd, len(ids))
+	for i, id := range ids {
+		commands[i] = p.HMGet(ctx, r.documentKey(collection, subset, id), redisScoreFields...)
+	}
+	if _, err := p.Exec(ctx); err != nil && err != redis.Nil {
+		return nil, errors.WithStack(err)
+	}
+	documents := make([]Score, 0, len(ids))
+	for i, command := range commands {
+		values, err := command.Result()
+		if err != nil && err != redis.Nil {
+			return nil, errors.WithStack(err)
+		}
+		document, found, err := decodeRedisScoreTuple(collection, subset, ids[i], values)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			documents = append(documents, document)
+		}
+	}
+	return documents, nil
+}
+
+var redisScoreFields = []string{"collection", "subset", "id", "score", "is_hidden", "categories", "timestamp"}
+
+func decodeRedisScoreTuple(collection, subset, id string, values []any) (Score, bool, error) {
+	if len(values) != len(redisScoreFields) {
+		return Score{}, false, errors.Errorf("invalid score tuple for %q", id)
+	}
+	missing := true
+	for _, value := range values {
+		if value != nil {
+			missing = false
+			break
+		}
+	}
+	if missing {
+		return Score{}, false, nil
+	}
+	parsed := make([]string, len(values))
+	for i, value := range values {
+		text, ok := value.(string)
+		if !ok {
+			return Score{}, false, errors.Errorf("invalid score field %q for %q", redisScoreFields[i], id)
+		}
+		parsed[i] = text
+	}
+	if parsed[0] != collection || parsed[1] != subset || parsed[2] != id {
+		return Score{}, false, errors.Errorf("invalid score identity for %q", id)
+	}
+	score, err := strconv.ParseFloat(parsed[3], 64)
+	if err != nil {
+		return Score{}, false, errors.WithStack(err)
+	}
+	isHidden, err := strconv.ParseInt(parsed[4], 10, 64)
+	if err != nil {
+		return Score{}, false, errors.WithStack(err)
+	}
+	if isHidden != 0 {
+		return Score{}, false, nil
+	}
+	categories, err := decodeCategories(parsed[5])
+	if err != nil {
+		return Score{}, false, errors.WithStack(err)
+	}
+	timestamp, err := strconv.ParseInt(parsed[6], 10, 64)
+	if err != nil {
+		return Score{}, false, errors.WithStack(err)
+	}
+	return Score{
+		Id:         parsed[2],
+		Score:      score,
+		Categories: categories,
+		Timestamp:  time.UnixMicro(timestamp).UTC(),
+	}, true, nil
 }
 
 func (r *Redis) SearchScores(ctx context.Context, collection, subset string, query []string, begin, end int) ([]Score, error) {

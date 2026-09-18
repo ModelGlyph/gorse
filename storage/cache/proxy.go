@@ -89,6 +89,24 @@ func (p *ProxyServer) AddScores(ctx context.Context, request *protocol.AddScores
 	return &protocol.AddScoresResponse{}, p.database.AddScores(ctx, request.GetCollection(), request.GetSubset(), scores)
 }
 
+func (p *ProxyServer) GetScores(ctx context.Context, request *protocol.GetScoresRequest) (*protocol.GetScoresResponse, error) {
+	resp, err := p.database.GetScores(ctx, request.GetCollection(), request.GetSubset(), request.GetIds())
+	if err != nil {
+		return nil, err
+	}
+	scores := make([]*protocol.Score, len(resp))
+	for i, score := range resp {
+		scores[i] = &protocol.Score{
+			Id:         score.Id,
+			Score:      score.Score,
+			IsHidden:   score.IsHidden,
+			Categories: score.Categories,
+			Timestamp:  timestamppb.New(score.Timestamp),
+		}
+	}
+	return &protocol.GetScoresResponse{Documents: scores}, nil
+}
+
 func (p *ProxyServer) SearchScores(ctx context.Context, request *protocol.SearchScoresRequest) (*protocol.SearchScoresResponse, error) {
 	resp, err := p.database.SearchScores(ctx, request.GetCollection(), request.GetSubset(), request.GetQuery(), int(request.GetBegin()), int(request.GetEnd()))
 	if err != nil {
@@ -246,6 +264,28 @@ func (p ProxyClient) AddScores(ctx context.Context, collection, subset string, d
 		Documents:  scores,
 	})
 	return err
+}
+
+func (p ProxyClient) GetScores(ctx context.Context, collection, subset string, ids []string) ([]Score, error) {
+	resp, err := p.CacheStoreClient.GetScores(ctx, &protocol.GetScoresRequest{
+		Collection: collection,
+		Subset:     subset,
+		Ids:        ids,
+	})
+	if err != nil {
+		return nil, err
+	}
+	scores := make([]Score, len(resp.Documents))
+	for i, score := range resp.Documents {
+		scores[i] = Score{
+			Id:         score.Id,
+			Score:      score.Score,
+			IsHidden:   score.IsHidden,
+			Categories: score.Categories,
+			Timestamp:  score.Timestamp.AsTime(),
+		}
+	}
+	return scores, nil
 }
 
 func (p ProxyClient) SearchScores(ctx context.Context, collection, subset string, query []string, begin, end int) ([]Score, error) {
