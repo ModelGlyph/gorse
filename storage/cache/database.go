@@ -29,6 +29,7 @@ import (
 
 const (
 	NonPersonalized                  = "non-personalized"
+	NonPersonalizedCandidateScores   = "non-personalized-candidate-scores"
 	NonPersonalizedDigest            = "non-personalized_digest"
 	NonPersonalizedUpdateTime        = "non-personalized_update_time"
 	ItemToItem                       = "item-to-item"
@@ -78,6 +79,7 @@ const (
 
 var ItemCache = []string{
 	NonPersonalized,
+	NonPersonalizedCandidateScores,
 	ItemToItem,
 	Recommend,
 }

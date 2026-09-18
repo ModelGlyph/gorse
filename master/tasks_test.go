@@ -19,11 +19,13 @@ import (
 	"fmt"
 	"runtime"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gorse-io/gorse/common/event"
 	"github.com/gorse-io/gorse/common/expression"
 	"github.com/gorse-io/gorse/config"
+	"github.com/gorse-io/gorse/dataset"
 	"github.com/gorse-io/gorse/logics"
 	"github.com/gorse-io/gorse/model/cf"
 	"github.com/gorse-io/gorse/model/ctr"
@@ -53,6 +55,70 @@ type failOnceVectorDatabase struct {
 	vectors.Database
 	name   string
 	failed bool
+}
+
+type failingNonPersonalizedCache struct {
+	cache.Database
+	failAt   string
+	addCalls int
+	setCalls int
+}
+
+type concurrentScanCache struct {
+	cache.Database
+	keys []string
+}
+
+func (d *concurrentScanCache) Scan(work func(string) error) error {
+	start := make(chan struct{})
+	errs := make(chan error, len(d.keys))
+	var waitGroup sync.WaitGroup
+	for _, key := range d.keys {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			<-start
+			if err := work(key); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	close(start)
+	waitGroup.Wait()
+	close(errs)
+	for err := range errs {
+		return err
+	}
+	return nil
+}
+
+func (d *failingNonPersonalizedCache) AddScores(ctx context.Context, collection, subset string, documents []cache.Score) error {
+	d.addCalls++
+	if d.failAt == "standard add" && d.addCalls == 1 {
+		return fmt.Errorf("standard add scores failed")
+	}
+	if d.failAt == "candidate add" && d.addCalls == 2 {
+		return fmt.Errorf("add scores failed")
+	}
+	return d.Database.AddScores(ctx, collection, subset, documents)
+}
+
+func (d *failingNonPersonalizedCache) DeleteScores(ctx context.Context, collections []string, condition cache.ScoreCondition) error {
+	if d.failAt == "delete" {
+		return fmt.Errorf("delete scores failed")
+	}
+	return d.Database.DeleteScores(ctx, collections, condition)
+}
+
+func (d *failingNonPersonalizedCache) Set(ctx context.Context, values ...cache.Value) error {
+	d.setCalls++
+	if d.failAt == "metadata" && d.setCalls == 1 {
+		return fmt.Errorf("metadata failed")
+	}
+	if d.failAt == "generation" && d.setCalls == 2 {
+		return fmt.Errorf("generation failed")
+	}
+	return d.Database.Set(ctx, values...)
 }
 
 func (d *failOnceVectorDatabase) DeleteCollection(ctx context.Context, name string) error {
@@ -580,7 +646,11 @@ func (s *MasterTestSuite) TestNonPersonalizedRecommend() {
 		expression.MustParseFeedbackTypeExpression("positive")}
 	s.Config.Recommend.DataSource.ReadFeedbackTypes = []expression.FeedbackTypeExpression{
 		expression.MustParseFeedbackTypeExpression("negative")}
-	s.Config.Recommend.NonPersonalized = []config.NonPersonalizedConfig{{Name: "latest", Score: "item.Timestamp.Unix()"}}
+	s.Config.Server.APIKey = "test_api_key"
+	s.Config.Recommend.NonPersonalized = []config.NonPersonalizedConfig{
+		{Name: "latest", Score: "item.Timestamp.Unix()"},
+		{Name: "candidate_latest", Score: "item.Timestamp.Unix()", CandidateComplete: true},
+	}
 	s.Config.Master.NumJobs = runtime.NumCPU()
 
 	// insert items
@@ -632,7 +702,7 @@ func (s *MasterTestSuite) TestNonPersonalizedRecommend() {
 	s.NoError(err)
 
 	// check latest items
-	latest, err := s.CacheClient.SearchScores(ctx, cache.NonPersonalized, "latest", []string{""}, 0, 3)
+	latest, err := s.CacheClient.SearchScores(ctx, cache.NonPersonalized, "latest", []string{""}, 0, len(items))
 	s.NoError(err)
 	s.Equal([]cache.Score{
 		{Id: items[9].ItemId, Score: float64(items[9].Timestamp.Unix())},
@@ -642,17 +712,187 @@ func (s *MasterTestSuite) TestNonPersonalizedRecommend() {
 		return cache.Score{Id: document.Id, Score: document.Score}
 	}))
 
+	// check candidate-complete scores beyond cache size
+	itemIDs := lo.Map(items, func(item data.Item, _ int) string { return item.ItemId })
+	candidateScores, err := s.CacheClient.GetScores(ctx, cache.NonPersonalizedCandidateScores, "candidate_latest", itemIDs)
+	s.NoError(err)
+	s.Len(candidateScores, len(items))
+	markerValue, err := s.CacheClient.Get(ctx, cache.Key(cache.NonPersonalizedCandidateGeneration, "candidate_latest")).String()
+	s.NoError(err)
+	generation, err := cache.DecodeCandidateGeneration(markerValue)
+	s.NoError(err)
+	s.Equal(s.Config.Recommend.NonPersonalized[1].Hash(), generation.Digest)
+	for _, score := range candidateScores {
+		s.Equal(generation.Timestamp, score.Timestamp)
+	}
+	candidateTop, err := s.CacheClient.SearchScores(ctx, cache.NonPersonalized, "candidate_latest", []string{""}, 0, len(items))
+	s.NoError(err)
+	s.Equal([]string{items[9].ItemId, items[7].ItemId, items[5].ItemId}, cache.ConvertDocumentsToValues(candidateTop))
+
 	// check digest
 	digest, err := s.CacheClient.Get(ctx, cache.Key(cache.NonPersonalizedDigest, "latest")).String()
 	s.NoError(err)
 	s.Equal(s.Config.Recommend.NonPersonalized[0].Hash(), digest)
 }
 
+func (s *MasterTestSuite) TestPersistCandidateCompleteGeneration() {
+	ctx := s.T().Context()
+	cfg := config.NonPersonalizedConfig{
+		Name:              "candidate_rank",
+		Score:             "len(feedback)",
+		CandidateComplete: true,
+	}
+	timestamp := time.Date(2026, 9, 19, 1, 2, 3, 456000000, time.UTC)
+	tests := []struct {
+		name       string
+		failAt     string
+		wantMarker bool
+	}{
+		{name: "add standard scores", failAt: "standard add"},
+		{name: "add candidate scores", failAt: "candidate add"},
+		{name: "delete stale scores", failAt: "delete"},
+		{name: "write metadata", failAt: "metadata"},
+		{name: "publish generation", failAt: "generation"},
+		{name: "success", wantMarker: true},
+	}
+	for _, test := range tests {
+		s.Run(test.name, func() {
+			s.NoError(s.CacheClient.Purge())
+			oldMarker := cache.EncodeCandidateGeneration(timestamp.Add(-time.Millisecond), "old-digest")
+			s.NoError(s.CacheClient.Set(ctx, cache.String(
+				cache.Key(cache.NonPersonalizedCandidateGeneration, cfg.Name), oldMarker,
+			)))
+			database := &failingNonPersonalizedCache{Database: s.CacheClient, failAt: test.failAt}
+			recommender, err := logics.NewNonPersonalized(cfg, 1, timestamp)
+			s.NoError(err)
+			recommender.Push(data.Item{ItemId: "zero"}, nil)
+			err = persistNonPersonalized(ctx, database, cfg, recommender)
+			if test.wantMarker {
+				s.NoError(err)
+			} else {
+				s.Error(err)
+			}
+			value, getErr := s.CacheClient.Get(ctx, cache.Key(cache.NonPersonalizedCandidateGeneration, cfg.Name)).String()
+			s.NoError(getErr)
+			if !test.wantMarker {
+				s.Equal(oldMarker, value)
+				return
+			}
+			generation, decodeErr := cache.DecodeCandidateGeneration(value)
+			s.NoError(decodeErr)
+			s.Equal(timestamp, generation.Timestamp)
+			s.Equal(cfg.Hash(), generation.Digest)
+			scores, getScoresErr := s.CacheClient.GetScores(ctx, cache.NonPersonalizedCandidateScores, cfg.Name, []string{"zero"})
+			s.NoError(getScoresErr)
+			s.Equal([]cache.Score{{Id: "zero", Categories: []string{""}, Timestamp: timestamp}}, scores)
+		})
+	}
+}
+
+func (s *MasterTestSuite) TestPersistEmptyCandidateCompleteGeneration() {
+	ctx := s.T().Context()
+	s.NoError(s.CacheClient.Purge())
+	cfg := config.NonPersonalizedConfig{
+		Name:              "candidate_rank",
+		Score:             "1",
+		Filter:            "false",
+		CandidateComplete: true,
+	}
+	oldTimestamp := time.Date(2026, 9, 19, 1, 2, 3, 455000000, time.UTC)
+	newTimestamp := oldTimestamp.Add(time.Millisecond)
+	s.NoError(s.CacheClient.AddScores(ctx, cache.NonPersonalizedCandidateScores, cfg.Name, []cache.Score{{
+		Id: "old", Score: 1, Timestamp: oldTimestamp,
+	}}))
+	recommender, err := logics.NewNonPersonalized(cfg, 1, newTimestamp)
+	s.NoError(err)
+	recommender.Push(data.Item{ItemId: "filtered"}, nil)
+	s.NoError(persistNonPersonalized(ctx, s.CacheClient, cfg, recommender))
+
+	scores, err := s.CacheClient.GetScores(ctx, cache.NonPersonalizedCandidateScores, cfg.Name, []string{"old", "filtered"})
+	s.NoError(err)
+	s.Empty(scores)
+	value, err := s.CacheClient.Get(ctx, cache.Key(cache.NonPersonalizedCandidateGeneration, cfg.Name)).String()
+	s.NoError(err)
+	generation, err := cache.DecodeCandidateGeneration(value)
+	s.NoError(err)
+	s.Equal(newTimestamp, generation.Timestamp)
+	s.Equal(cfg.Hash(), generation.Digest)
+}
+
+func (s *MasterTestSuite) TestNextCandidateGeneration() {
+	ctx := s.T().Context()
+	s.NoError(s.CacheClient.Purge())
+	now := time.Date(2026, 9, 19, 1, 2, 3, 456789123, time.FixedZone("test", 8*60*60))
+	generation, err := nextCandidateGeneration(ctx, s.CacheClient, "candidate_rank", now)
+	s.NoError(err)
+	s.Equal(now.UTC().Truncate(time.Millisecond), generation)
+	watermark, err := s.CacheClient.Get(ctx, cache.Key(
+		cache.NonPersonalizedCandidateGenerationWatermark, "candidate_rank",
+	)).Time()
+	s.NoError(err)
+	s.Equal(generation, watermark)
+
+	previous := generation.Add(10 * time.Millisecond)
+	s.NoError(s.CacheClient.Set(ctx, cache.String(
+		cache.Key(cache.NonPersonalizedCandidateGeneration, "candidate_rank"),
+		cache.EncodeCandidateGeneration(previous, "digest"),
+	)))
+	generation, err = nextCandidateGeneration(ctx, s.CacheClient, "candidate_rank", now)
+	s.NoError(err)
+	s.Equal(previous.Add(time.Millisecond), generation)
+}
+
+func (s *MasterTestSuite) TestFailedCandidateGenerationIsNotReused() {
+	ctx := s.T().Context()
+	s.NoError(s.CacheClient.Purge())
+	cfg := config.NonPersonalizedConfig{
+		Name:              "candidate_rank",
+		Score:             "1",
+		CandidateComplete: true,
+	}
+	now := time.Date(2026, 9, 19, 1, 2, 3, 456789123, time.UTC)
+	firstGeneration, err := nextCandidateGeneration(ctx, s.CacheClient, cfg.Name, now)
+	s.NoError(err)
+	first, err := logics.NewNonPersonalized(cfg, 1, firstGeneration)
+	s.NoError(err)
+	first.Push(data.Item{ItemId: "first"}, nil)
+	s.Error(persistNonPersonalized(ctx, &failingNonPersonalizedCache{
+		Database: s.CacheClient,
+		failAt:   "delete",
+	}, cfg, first))
+
+	secondGeneration, err := nextCandidateGeneration(ctx, s.CacheClient, cfg.Name, now.Add(-time.Hour))
+	s.NoError(err)
+	s.Equal(firstGeneration.Add(time.Millisecond), secondGeneration)
+	second, err := logics.NewNonPersonalized(cfg, 1, secondGeneration)
+	s.NoError(err)
+	second.Push(data.Item{ItemId: "second"}, nil)
+	s.NoError(persistNonPersonalized(ctx, s.CacheClient, cfg, second))
+
+	scores, err := s.CacheClient.GetScores(ctx, cache.NonPersonalizedCandidateScores, cfg.Name, []string{"first", "second"})
+	s.NoError(err)
+	s.Equal([]cache.Score{{
+		Id:         "second",
+		Score:      1,
+		Categories: []string{""},
+		Timestamp:  secondGeneration,
+	}}, scores)
+	value, err := s.CacheClient.Get(ctx, cache.Key(cache.NonPersonalizedCandidateGeneration, cfg.Name)).String()
+	s.NoError(err)
+	completed, err := cache.DecodeCandidateGeneration(value)
+	s.NoError(err)
+	s.Equal(secondGeneration, completed.Timestamp)
+}
+
 func (s *MasterTestSuite) TestGarbageCollection() {
 	// create config
 	s.Config = &config.Config{}
 	s.Config.Master.NumJobs = 1
-	s.Config.Recommend.NonPersonalized = []config.NonPersonalizedConfig{{Name: "custom", Score: "1"}}
+	s.Config.Server.APIKey = "test_api_key"
+	s.Config.Recommend.NonPersonalized = []config.NonPersonalizedConfig{
+		{Name: "custom", Score: "1", CandidateComplete: true},
+		{Name: "disabled", Score: "1"},
+	}
 
 	// insert items
 	ctx := s.T().Context()
@@ -681,6 +921,21 @@ func (s *MasterTestSuite) TestGarbageCollection() {
 		{Id: "2", Score: 2, Categories: []string{""}, Timestamp: timestamp},
 	})
 	s.NoError(err)
+	for _, subset := range []string{"custom", "disabled", "unknown"} {
+		err = s.CacheClient.AddScores(ctx, cache.NonPersonalizedCandidateScores, subset, []cache.Score{
+			{Id: "1", Score: 1, Categories: []string{""}, Timestamp: timestamp},
+			{Id: "2", Score: 2, Categories: []string{""}, Timestamp: timestamp},
+		})
+		s.NoError(err)
+		s.NoError(s.CacheClient.Set(ctx,
+			cache.String(cache.Key(cache.NonPersonalizedCandidateGeneration, subset), cache.EncodeCandidateGeneration(timestamp, "digest")),
+			cache.Time(cache.Key(cache.NonPersonalizedCandidateGenerationWatermark, subset), timestamp),
+		))
+	}
+	s.NoError(s.CacheClient.Set(ctx,
+		cache.String(cache.Key(cache.NonPersonalizedCandidateGeneration, "empty"), cache.EncodeCandidateGeneration(timestamp, "digest")),
+		cache.Time(cache.Key(cache.NonPersonalizedCandidateGenerationWatermark, "empty"), timestamp),
+	))
 
 	// insert collaborative filtering cache
 	err = s.CacheClient.AddScores(ctx, cache.CollaborativeFiltering, "1", []cache.Score{
@@ -707,6 +962,27 @@ func (s *MasterTestSuite) TestGarbageCollection() {
 	np, err = s.CacheClient.SearchScores(ctx, cache.NonPersonalized, "unknown", nil, 0, 100)
 	s.NoError(err)
 	s.Empty(np)
+	for _, subset := range []string{"disabled", "unknown"} {
+		candidateScores, getErr := s.CacheClient.SearchScores(ctx, cache.NonPersonalizedCandidateScores, subset, nil, 0, 100)
+		s.NoError(getErr)
+		s.Empty(candidateScores)
+	}
+	candidateScores, err := s.CacheClient.SearchScores(ctx, cache.NonPersonalizedCandidateScores, "custom", nil, 0, 100)
+	s.NoError(err)
+	s.ElementsMatch([]string{"1", "2"}, cache.ConvertDocumentsToValues(candidateScores))
+	for _, subset := range []string{"disabled", "unknown", "empty"} {
+		for _, prefix := range []string{
+			cache.NonPersonalizedCandidateGeneration,
+			cache.NonPersonalizedCandidateGenerationWatermark,
+		} {
+			value, getErr := s.CacheClient.Get(ctx, cache.Key(prefix, subset)).String()
+			s.NoError(getErr)
+			s.Empty(value)
+		}
+	}
+	marker, err := s.CacheClient.Get(ctx, cache.Key(cache.NonPersonalizedCandidateGeneration, "custom")).String()
+	s.NoError(err)
+	s.NotEmpty(marker)
 
 	// check collaborative filtering cache
 	cf, err := s.CacheClient.SearchScores(ctx, cache.CollaborativeFiltering, "1", nil, 0, 100)
@@ -715,6 +991,54 @@ func (s *MasterTestSuite) TestGarbageCollection() {
 	cf, err = s.CacheClient.SearchScores(ctx, cache.CollaborativeFiltering, "3", nil, 0, 100)
 	s.NoError(err)
 	s.Empty(cf)
+}
+
+func (s *MasterTestSuite) TestGarbageCollectionWithConcurrentValueScan() {
+	ctx := s.T().Context()
+	s.NoError(s.CacheClient.Purge())
+	s.Config = &config.Config{}
+	s.Config.Recommend.NonPersonalized = []config.NonPersonalizedConfig{{
+		Name:              "active",
+		Score:             "1",
+		CandidateComplete: true,
+	}}
+
+	timestamp := time.Date(2026, 9, 19, 1, 2, 3, 456000000, time.UTC)
+	values := []cache.Value{
+		cache.String(cache.Key(cache.NonPersonalizedCandidateGeneration, "active"), cache.EncodeCandidateGeneration(timestamp, "digest")),
+		cache.Time(cache.Key(cache.NonPersonalizedCandidateGenerationWatermark, "active"), timestamp),
+	}
+	keys := []string{
+		cache.Key(cache.NonPersonalizedCandidateGeneration, "active"),
+		cache.Key(cache.NonPersonalizedCandidateGenerationWatermark, "active"),
+	}
+	for i := range 64 {
+		name := fmt.Sprintf("stale-%02d", i)
+		markerKey := cache.Key(cache.NonPersonalizedCandidateGeneration, name)
+		watermarkKey := cache.Key(cache.NonPersonalizedCandidateGenerationWatermark, name)
+		values = append(values,
+			cache.String(markerKey, cache.EncodeCandidateGeneration(timestamp, "digest")),
+			cache.Time(watermarkKey, timestamp),
+		)
+		keys = append(keys, markerKey, watermarkKey)
+	}
+	s.NoError(s.CacheClient.Set(ctx, values...))
+
+	underlying := s.CacheClient
+	s.CacheClient = &concurrentScanCache{Database: underlying, keys: keys}
+	defer func() { s.CacheClient = underlying }()
+	s.NoError(s.collectGarbage(ctx, dataset.NewDataset(timestamp, 0, 0)))
+
+	for _, key := range keys[:2] {
+		value, err := underlying.Get(ctx, key).String()
+		s.NoError(err)
+		s.NotEmpty(value)
+	}
+	for _, key := range keys[2:] {
+		value, err := underlying.Get(ctx, key).String()
+		s.NoError(err)
+		s.Empty(value)
+	}
 }
 
 func (s *MasterTestSuite) TestLoadDataFromDatabaseInParallel() {

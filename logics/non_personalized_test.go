@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/gorse-io/gorse/config"
+	"github.com/gorse-io/gorse/storage/cache"
 	"github.com/gorse-io/gorse/storage/data"
 	"github.com/stretchr/testify/assert"
 )
@@ -63,6 +64,40 @@ func TestPopular(t *testing.T) {
 		assert.Equal(t, strconv.Itoa(99-i), scores[i].Id)
 		assert.Equal(t, float64(99-i), scores[i].Score)
 	}
+}
+
+func TestCandidateComplete(t *testing.T) {
+	timestamp := time.Now().UTC().Truncate(time.Millisecond)
+	recommender, err := NewNonPersonalized(config.NonPersonalizedConfig{
+		Name:              "candidate_rank",
+		Score:             "len(feedback)",
+		Filter:            `item.Comment != "filtered"`,
+		CandidateComplete: true,
+	}, 2, timestamp)
+	assert.NoError(t, err)
+
+	recommender.Push(data.Item{ItemId: "zero", Categories: []string{"work"}}, nil)
+	recommender.Push(data.Item{ItemId: "b"}, make([]data.Feedback, 1))
+	recommender.Push(data.Item{ItemId: "a"}, make([]data.Feedback, 1))
+	recommender.Push(data.Item{ItemId: "top"}, make([]data.Feedback, 2))
+	recommender.Push(data.Item{ItemId: "hidden", IsHidden: true}, make([]data.Feedback, 3))
+	recommender.Push(data.Item{ItemId: "filtered", Comment: "filtered"}, make([]data.Feedback, 4))
+
+	assert.Equal(t, []cache.Score{
+		{Id: "top", Score: 2, Categories: []string{""}, Timestamp: timestamp},
+		{Id: "a", Score: 1, Categories: []string{""}, Timestamp: timestamp},
+		{Id: "b", Score: 1, Categories: []string{""}, Timestamp: timestamp},
+		{Id: "zero", Score: 0, Categories: []string{"", "work"}, Timestamp: timestamp},
+	}, recommender.PopAllCandidateScores())
+	defaultCount := 0
+	for _, score := range recommender.PopAll() {
+		for _, category := range score.Categories {
+			if category == "" {
+				defaultCount++
+			}
+		}
+	}
+	assert.Equal(t, 2, defaultCount)
 }
 
 func TestPopularWindow(t *testing.T) {

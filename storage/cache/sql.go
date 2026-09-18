@@ -342,7 +342,7 @@ func (db *SQLDatabase) AddScores(ctx context.Context, collection, subset string,
 	}
 	err := db.gormDB.WithContext(ctx).Table(db.DocumentTable()).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "collection"}, {Name: "subset"}, {Name: "id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"score", "categories", "timestamp"}),
+		DoUpdates: clause.AssignmentColumns([]string{"score", "is_hidden", "categories", "timestamp"}),
 	}).Create(rows).Error
 	return errors.WithStack(err)
 }

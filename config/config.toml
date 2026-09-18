@@ -199,6 +199,9 @@ score = "count(feedback, .FeedbackType == 'star')"
 # The filter for items in the leaderboard.
 filter = "(now() - item.Timestamp).Hours() < 168"
 
+# Preserve every successfully scored item for bounded candidate ranking. The default value is false and requires server.api_key.
+candidate_complete = false
+
 [[recommend.item-to-item]]
 
 # The name of the item-to-item recommender.
