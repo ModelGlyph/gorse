@@ -198,14 +198,11 @@ func (s *RestServer) AuthFilter(req *restful.Request, resp *restful.Response, ch
 		chain.ProcessFilter(req, resp)
 		return
 	}
-	apikey := req.HeaderParameter("X-API-Key")
-	if apikey == s.Config.Server.APIKey {
+	if req.HeaderParameter("X-API-Key") == s.Config.Server.APIKey {
 		chain.ProcessFilter(req, resp)
 		return
 	}
-	log.ResponseLogger(resp).Error("unauthorized",
-		zap.String("api_key", s.Config.Server.APIKey),
-		zap.String("X-API-Key", apikey))
+	log.ResponseLogger(resp).Error("unauthorized")
 	if err := resp.WriteError(http.StatusUnauthorized, fmt.Errorf("unauthorized")); err != nil {
 		log.ResponseLogger(resp).Error("failed to write error", zap.Error(err))
 	}
@@ -520,6 +517,14 @@ func (s *RestServer) CreateWebService() {
 		Param(ws.QueryParameter("n", "Number of returned users").DataType("integer")).
 		Param(ws.QueryParameter("offset", "Offset of returned users").DataType("integer")).
 		Param(ws.QueryParameter("user-id", "Remove read items of a user").DataType("string")).
+		Returns(http.StatusOK, "OK", []cache.Score{}).
+		Writes([]cache.Score{}))
+	ws.Route(ws.POST("/non-personalized/{name}/candidate-rank").To(s.rankNonPersonalizedCandidates).
+		Doc("Rank an exact candidate set with a candidate-complete non-personalized recommender.").
+		Metadata(restfulspec.KeyOpenAPITags, []string{RecommendationAPITag}).
+		Param(ws.HeaderParameter("X-API-Key", "API key").DataType("string")).
+		Param(ws.PathParameter("name", "Name of the non-personalized recommender.").DataType("string")).
+		Reads(candidateRankRequest{}).
 		Returns(http.StatusOK, "OK", []cache.Score{}).
 		Writes([]cache.Score{}))
 	// Get item-to-item recommendation

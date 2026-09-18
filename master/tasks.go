@@ -95,7 +95,14 @@ func (m *Master) loadDataset(parent context.Context) (datasets Datasets, err err
 	initialStartTime := time.Now()
 	nonPersonalizedRecommenders := make([]*logics.NonPersonalized, 0, len(m.Config.Recommend.NonPersonalized))
 	for _, cfg := range m.Config.Recommend.NonPersonalized {
-		recommender, err := logics.NewNonPersonalized(cfg, m.Config.Recommend.CacheSize, initialStartTime)
+		timestamp := initialStartTime
+		if cfg.CandidateComplete {
+			timestamp, err = nextCandidateGeneration(ctx, m.CacheClient, cfg.Name, initialStartTime)
+			if err != nil {
+				return Datasets{}, errors.WithStack(err)
+			}
+		}
+		recommender, err := logics.NewNonPersonalized(cfg, m.Config.Recommend.CacheSize, timestamp)
 		if err != nil {
 			return Datasets{}, errors.WithStack(err)
 		}
@@ -127,22 +134,9 @@ func (m *Master) loadDataset(parent context.Context) (datasets Datasets, err err
 
 	// save non-personalized recommenders to cache
 	for i, recommender := range nonPersonalizedRecommenders {
-		scores := recommender.PopAll()
-		if err = m.CacheClient.AddScores(ctx, cache.NonPersonalized, recommender.Name(), scores); err != nil {
-			log.Logger().Error("failed to cache non-personalized recommenders", zap.Error(err))
-		}
-		if err = m.CacheClient.DeleteScores(ctx, []string{cache.NonPersonalized},
-			cache.ScoreCondition{
-				Subset: new(recommender.Name()),
-				Before: new(recommender.Timestamp()),
-			}); err != nil {
-			log.Logger().Error("failed to reclaim outdated items", zap.Error(err))
-		}
-		if err = m.CacheClient.Set(ctx,
-			cache.Time(cache.Key(cache.NonPersonalizedUpdateTime, recommender.Name()), recommender.Timestamp()),
-			cache.String(cache.Key(cache.NonPersonalizedDigest, recommender.Name()), m.Config.Recommend.NonPersonalized[i].Hash()),
-		); err != nil {
-			log.Logger().Error("failed to write meta", zap.Error(err))
+		if persistErr := persistNonPersonalized(ctx, m.CacheClient, m.Config.Recommend.NonPersonalized[i], recommender); persistErr != nil {
+			log.Logger().Error("failed to persist non-personalized recommender",
+				zap.String("name", recommender.Name()), zap.Error(persistErr))
 		}
 	}
 
@@ -246,6 +240,76 @@ func (m *Master) loadDataset(parent context.Context) (datasets Datasets, err err
 
 	LoadDatasetTotalSeconds.Set(time.Since(initialStartTime).Seconds())
 	return
+}
+
+func nextCandidateGeneration(ctx context.Context, database cache.Database, name string, now time.Time) (time.Time, error) {
+	next := now.UTC().Truncate(time.Millisecond)
+	previous, err := database.Get(ctx, cache.Key(cache.NonPersonalizedCandidateGenerationWatermark, name)).Time()
+	if err != nil {
+		return time.Time{}, errors.WithStack(err)
+	}
+	value, err := database.Get(ctx, cache.Key(cache.NonPersonalizedCandidateGeneration, name)).String()
+	if err != nil {
+		return time.Time{}, errors.WithStack(err)
+	}
+	if value != "" {
+		completed, decodeErr := cache.DecodeCandidateGeneration(value)
+		if decodeErr != nil {
+			return time.Time{}, errors.WithStack(decodeErr)
+		}
+		if completed.Timestamp.After(previous) {
+			previous = completed.Timestamp
+		}
+	}
+	if !next.After(previous) {
+		next = previous.Add(time.Millisecond)
+	}
+	if err = database.Set(ctx, cache.Time(
+		cache.Key(cache.NonPersonalizedCandidateGenerationWatermark, name), next,
+	)); err != nil {
+		return time.Time{}, errors.WithStack(err)
+	}
+	return next, nil
+}
+
+func persistNonPersonalized(ctx context.Context, database cache.Database, cfg config.NonPersonalizedConfig, recommender *logics.NonPersonalized) error {
+	standardScores := recommender.PopAll()
+	if len(standardScores) > 0 {
+		if err := database.AddScores(ctx, cache.NonPersonalized, recommender.Name(), standardScores); err != nil {
+			return errors.WithStack(err)
+		}
+	}
+	collections := []string{cache.NonPersonalized}
+	if cfg.CandidateComplete {
+		candidateScores := recommender.PopAllCandidateScores()
+		if len(candidateScores) > 0 {
+			if err := database.AddScores(ctx, cache.NonPersonalizedCandidateScores, recommender.Name(), candidateScores); err != nil {
+				return errors.WithStack(err)
+			}
+		}
+		collections = append(collections, cache.NonPersonalizedCandidateScores)
+	}
+	if err := database.DeleteScores(ctx, collections, cache.ScoreCondition{
+		Subset: new(recommender.Name()),
+		Before: new(recommender.Timestamp()),
+	}); err != nil {
+		return errors.WithStack(err)
+	}
+	if err := database.Set(ctx,
+		cache.Time(cache.Key(cache.NonPersonalizedUpdateTime, recommender.Name()), recommender.Timestamp()),
+		cache.String(cache.Key(cache.NonPersonalizedDigest, recommender.Name()), cfg.Hash()),
+	); err != nil {
+		return errors.WithStack(err)
+	}
+	if cfg.CandidateComplete {
+		if err := database.Set(ctx, cache.String(
+			cache.Key(cache.NonPersonalizedCandidateGeneration, recommender.Name()),
+			cache.EncodeCandidateGeneration(recommender.Timestamp(), cfg.Hash()),
+		)); err != nil {
+			return errors.WithStack(err)
+		}
+	}
+	return nil
 }
 
 // runLoadDatasetTask loads dataset.
@@ -1242,6 +1306,12 @@ func (m *Master) removeOutOfDateModels(ctx context.Context) {
 func (m *Master) collectGarbage(parent context.Context, dataSet *dataset.Dataset) error {
 	ctx, span := m.tracer.Start(parent, "Collect Garbage in Cache", 1)
 	defer span.End()
+	candidateComplete := make(map[string]struct{})
+	for _, cfg := range m.Config.Recommend.NonPersonalized {
+		if cfg.CandidateComplete {
+			candidateComplete[cfg.Name] = struct{}{}
+		}
+	}
 	err := m.CacheClient.ScanScores(ctx, func(collection, id, subset string, timestamp time.Time) error {
 		switch collection {
 		case cache.NonPersonalized:
@@ -1249,6 +1319,12 @@ func (m *Master) collectGarbage(parent context.Context, dataSet *dataset.Dataset
 				return cfg.Name == subset
 			}) {
 				return m.CacheClient.DeleteScores(ctx, []string{cache.NonPersonalized}, cache.ScoreCondition{
+					Subset: new(subset),
+				})
+			}
+		case cache.NonPersonalizedCandidateScores:
+			if _, exists := candidateComplete[subset]; !exists {
+				return m.CacheClient.DeleteScores(ctx, []string{cache.NonPersonalizedCandidateScores}, cache.ScoreCondition{
 					Subset: new(subset),
 				})
 			}
@@ -1262,7 +1338,40 @@ func (m *Master) collectGarbage(parent context.Context, dataSet *dataset.Dataset
 		}
 		return nil
 	})
-	return errors.WithStack(err)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+
+	obsoleteKeys := make(map[string]struct{})
+	var obsoleteKeysMutex sync.Mutex
+	generationPrefixes := []string{
+		cache.NonPersonalizedCandidateGeneration + "/",
+		cache.NonPersonalizedCandidateGenerationWatermark + "/",
+	}
+	if err = m.CacheClient.Scan(func(key string) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		for _, prefix := range generationPrefixes {
+			if strings.HasPrefix(key, prefix) {
+				name := strings.TrimPrefix(key, prefix)
+				if _, exists := candidateComplete[name]; !exists {
+					obsoleteKeysMutex.Lock()
+					obsoleteKeys[key] = struct{}{}
+					obsoleteKeysMutex.Unlock()
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		return errors.WithStack(err)
+	}
+	for key := range obsoleteKeys {
+		if err = m.CacheClient.Delete(ctx, key); err != nil {
+			return errors.WithStack(err)
+		}
+	}
+	return nil
 }
 
 func (m *Master) optimizeCollaborativeFiltering(parent context.Context, trainSet, testSet dataset.CFSplit) error {

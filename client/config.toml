@@ -110,6 +110,9 @@ name = "popular"
 # The score function for items in the leaderboard.
 score = "len(feedback)"
 
+# Preserve every successfully scored item for bounded candidate ranking. The default value is false and requires server.api_key.
+candidate_complete = false
+
 [[recommend.item-to-item]]
 
 # The name of the item-to-item recommender.

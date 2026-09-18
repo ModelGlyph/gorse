@@ -15,6 +15,7 @@
 package logics
 
 import (
+	"math"
 	"reflect"
 	"sort"
 	"sync"
@@ -40,6 +41,7 @@ type NonPersonalized struct {
 	filterFunc *vm.Program
 	heapSize   int
 	heaps      map[string]*heap.TopKFilter[string, float64]
+	allScores  map[string]cache.Score
 }
 
 func NewNonPersonalized(cfg config.NonPersonalizedConfig, n int, timestamp time.Time) (*NonPersonalized, error) {
@@ -80,6 +82,7 @@ func NewNonPersonalized(cfg config.NonPersonalizedConfig, n int, timestamp time.
 		filterFunc: filterFunc,
 		heapSize:   n,
 		heaps:      heaps,
+		allScores:  lo.Ternary(cfg.CandidateComplete, make(map[string]cache.Score), nil),
 	}, nil
 }
 
@@ -129,9 +132,21 @@ func (l *NonPersonalized) Push(item data.Item, feedback []data.Feedback) {
 		log.Logger().Error("score function must return float64", zap.Any("result", result))
 		return
 	}
+	if math.IsNaN(score) || math.IsInf(score, 0) {
+		log.Logger().Error("score function returned a non-finite value", zap.String("item_id", item.ItemId))
+		return
+	}
 	// Add to heap
 	l.Lock()
 	defer l.Unlock()
+	if l.allScores != nil {
+		l.allScores[item.ItemId] = cache.Score{
+			Id:         item.ItemId,
+			Score:      score,
+			Categories: lo.Uniq(append([]string{""}, item.Categories...)),
+			Timestamp:  l.timestamp,
+		}
+	}
 	l.heaps[""].Push(item.ItemId, score)
 	for _, group := range item.Categories {
 		if _, exist := l.heaps[group]; !exist {
@@ -164,6 +179,25 @@ func (l *NonPersonalized) PopAll() []cache.Score {
 		return *v
 	})
 	sort.Slice(result, func(i, j int) bool {
+		if result[i].Score == result[j].Score {
+			return result[i].Id < result[j].Id
+		}
+		return result[i].Score > result[j].Score
+	})
+	return result
+}
+
+// PopAllCandidateScores 返回候选完整模式本轮成功产生的全部评分。
+func (l *NonPersonalized) PopAllCandidateScores() []cache.Score {
+	l.Lock()
+	defer l.Unlock()
+	result := lo.MapToSlice(l.allScores, func(_ string, score cache.Score) cache.Score {
+		return score
+	})
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Score == result[j].Score {
+			return result[i].Id < result[j].Id
+		}
 		return result[i].Score > result[j].Score
 	})
 	return result

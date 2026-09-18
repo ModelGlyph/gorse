@@ -359,6 +359,10 @@ func TestNonPersonalizedConfig(t *testing.T) {
 	a = NonPersonalizedConfig{Filter: "a"}
 	b = NonPersonalizedConfig{Filter: "b"}
 	assert.NotEqual(t, a.Hash(), b.Hash())
+
+	a = NonPersonalizedConfig{CandidateComplete: true}
+	b = NonPersonalizedConfig{CandidateComplete: false}
+	assert.NotEqual(t, a.Hash(), b.Hash())
 }
 
 func TestItemToItemConfig(t *testing.T) {
@@ -527,6 +531,20 @@ func (s *ValidateTestSuite) TestDuplicateNonPersonalized() {
 		Score: "count(feedback, .FeedbackType == 'star')",
 	}}
 	s.Error(s.Validate())
+}
+
+func (s *ValidateTestSuite) TestCandidateCompleteRequiresAPIKey() {
+	s.Recommend.NonPersonalized = []NonPersonalizedConfig{{
+		Name:              "candidate_rank",
+		Score:             "1",
+		CandidateComplete: true,
+	}}
+	for _, apiKey := range []string{"", "   "} {
+		s.Server.APIKey = apiKey
+		s.Error(s.Validate())
+	}
+	s.Server.APIKey = "secret"
+	s.NoError(s.Validate())
 }
 
 func (s *ValidateTestSuite) TestDuplicateItemToItem() {

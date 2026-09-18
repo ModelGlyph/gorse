@@ -285,9 +285,10 @@ type SearchConfig struct {
 }
 
 type NonPersonalizedConfig struct {
-	Name   string `mapstructure:"name" json:"name"`
-	Score  string `mapstructure:"score" json:"score" validate:"required,item_expr"`
-	Filter string `mapstructure:"filter" json:"filter" validate:"item_expr"`
+	Name              string `mapstructure:"name" json:"name"`
+	Score             string `mapstructure:"score" json:"score" validate:"required,item_expr"`
+	Filter            string `mapstructure:"filter" json:"filter" validate:"item_expr"`
+	CandidateComplete bool   `mapstructure:"candidate_complete" json:"candidate_complete"`
 }
 
 func (config *NonPersonalizedConfig) FullName() string {
@@ -299,6 +300,9 @@ func (config *NonPersonalizedConfig) Hash() string {
 	hash.Write([]byte(config.Name))
 	hash.Write([]byte(config.Score))
 	hash.Write([]byte(config.Filter))
+	if config.CandidateComplete {
+		hash.Write([]byte("candidate_complete"))
+	}
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
@@ -848,6 +852,9 @@ func (config *Config) Validate() error {
 			return errors.Errorf("non-personalized recommender %v is duplicated", nonPersonalized.Name)
 		}
 		nonPersonalizedNames.Add(nonPersonalized.Name)
+		if nonPersonalized.CandidateComplete && strings.TrimSpace(config.Server.APIKey) == "" {
+			return errors.Errorf("server api key is required by candidate-complete non-personalized recommender %v", nonPersonalized.Name)
+		}
 	}
 
 	// Check item-to-item recommenders
