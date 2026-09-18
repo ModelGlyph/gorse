@@ -79,6 +79,8 @@ type RerankerPrompt struct {
 	Documents []string `json:"documents"`
 }
 
+const candidateRankRoute = "/api/non-personalized/{name}/candidate-rank"
+
 func (m *Master) CreateWebService() {
 	ws := m.WebService
 	ws.Consumes(restful.MIME_JSON).Produces(restful.MIME_JSON)
@@ -421,6 +423,10 @@ func (m *Master) logout(response http.ResponseWriter, request *http.Request) {
 }
 
 func (m *Master) LoginFilter(req *restful.Request, resp *restful.Response, chain *restful.FilterChain) {
+	if req.SelectedRoutePath() == candidateRankRoute {
+		chain.ProcessFilter(req, resp)
+		return
+	}
 	if m.checkLogin(req.Request) {
 		req.Request.Header.Set("X-API-Key", m.Config.Server.APIKey)
 		chain.ProcessFilter(req, resp)

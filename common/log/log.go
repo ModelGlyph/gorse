@@ -29,6 +29,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
+	"go.uber.org/zap/zaptest/observer"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -95,11 +96,26 @@ func CloseLogger() {
 // SetTestLogger redirects Gorse logs to t.Log until the test finishes.
 func SetTestLogger(t testing.TB) {
 	t.Helper()
+	setTestLogger(t, zaptest.NewLogger(t, zaptest.Level(zap.DebugLevel)))
+}
+
+// SetTestLoggerWithObserver redirects Gorse logs to t.Log and returns the captured entries.
+func SetTestLoggerWithObserver(t testing.TB) *observer.ObservedLogs {
+	t.Helper()
+	observedCore, observedLogs := observer.New(zap.DebugLevel)
+	testLogger := zap.New(zapcore.NewTee(
+		zaptest.NewLogger(t, zaptest.Level(zap.DebugLevel)).Core(),
+		observedCore,
+	))
+	setTestLogger(t, testLogger)
+	return observedLogs
+}
+
+func setTestLogger(t testing.TB, testLogger *zap.Logger) {
 	oldLogger := logger
 	oldOpenAILogger := openaiLogger
 	oldAccessLogger := accessLogger
 
-	testLogger := zaptest.NewLogger(t, zaptest.Level(zap.DebugLevel))
 	logger = testLogger
 	openaiLogger = testLogger
 	accessLogger = testLogger
