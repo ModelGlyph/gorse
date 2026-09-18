@@ -239,6 +239,7 @@ type Database interface {
 	Delete(ctx context.Context, name string) error
 
 	AddScores(ctx context.Context, collection, subset string, documents []Score) error
+	GetScores(ctx context.Context, collection, subset string, ids []string) ([]Score, error)
 	SearchScores(ctx context.Context, collection, subset string, query []string, begin, end int) ([]Score, error)
 	DeleteScores(ctx context.Context, collection []string, condition ScoreCondition) error
 	UpdateScores(ctx context.Context, collections []string, subset *string, id string, patch ScorePatch) error

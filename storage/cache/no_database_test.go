@@ -48,6 +48,8 @@ func TestNoDatabase(t *testing.T) {
 
 	err = database.AddScores(ctx, "", "", nil)
 	assert.ErrorIs(t, err, storage.ErrNoDatabase)
+	_, err = database.GetScores(ctx, "", "", nil)
+	assert.ErrorIs(t, err, storage.ErrNoDatabase)
 	_, err = database.SearchScores(ctx, "", "", nil, 0, 0)
 	assert.ErrorIs(t, err, storage.ErrNoDatabase)
 	err = database.UpdateScores(ctx, nil, nil, "", ScorePatch{})

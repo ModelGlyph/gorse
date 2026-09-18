@@ -688,6 +688,110 @@ func (*AddScoresResponse) Descriptor() ([]byte, []int) {
 	return file_cache_store_proto_rawDescGZIP(), []int{12}
 }
 
+type GetScoresRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Collection    string                 `protobuf:"bytes,1,opt,name=collection,proto3" json:"collection,omitempty"`
+	Subset        string                 `protobuf:"bytes,2,opt,name=subset,proto3" json:"subset,omitempty"`
+	Ids           []string               `protobuf:"bytes,3,rep,name=ids,proto3" json:"ids,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetScoresRequest) Reset() {
+	*x = GetScoresRequest{}
+	mi := &file_cache_store_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetScoresRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetScoresRequest) ProtoMessage() {}
+
+func (x *GetScoresRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cache_store_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetScoresRequest.ProtoReflect.Descriptor instead.
+func (*GetScoresRequest) Descriptor() ([]byte, []int) {
+	return file_cache_store_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *GetScoresRequest) GetCollection() string {
+	if x != nil {
+		return x.Collection
+	}
+	return ""
+}
+
+func (x *GetScoresRequest) GetSubset() string {
+	if x != nil {
+		return x.Subset
+	}
+	return ""
+}
+
+func (x *GetScoresRequest) GetIds() []string {
+	if x != nil {
+		return x.Ids
+	}
+	return nil
+}
+
+type GetScoresResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Documents     []*Score               `protobuf:"bytes,1,rep,name=documents,proto3" json:"documents,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetScoresResponse) Reset() {
+	*x = GetScoresResponse{}
+	mi := &file_cache_store_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetScoresResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetScoresResponse) ProtoMessage() {}
+
+func (x *GetScoresResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_cache_store_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetScoresResponse.ProtoReflect.Descriptor instead.
+func (*GetScoresResponse) Descriptor() ([]byte, []int) {
+	return file_cache_store_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *GetScoresResponse) GetDocuments() []*Score {
+	if x != nil {
+		return x.Documents
+	}
+	return nil
+}
+
 type SearchScoresRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Collection    string                 `protobuf:"bytes,1,opt,name=collection,proto3" json:"collection,omitempty"`
@@ -701,7 +805,7 @@ type SearchScoresRequest struct {
 
 func (x *SearchScoresRequest) Reset() {
 	*x = SearchScoresRequest{}
-	mi := &file_cache_store_proto_msgTypes[13]
+	mi := &file_cache_store_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -713,7 +817,7 @@ func (x *SearchScoresRequest) String() string {
 func (*SearchScoresRequest) ProtoMessage() {}
 
 func (x *SearchScoresRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cache_store_proto_msgTypes[13]
+	mi := &file_cache_store_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -726,7 +830,7 @@ func (x *SearchScoresRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchScoresRequest.ProtoReflect.Descriptor instead.
 func (*SearchScoresRequest) Descriptor() ([]byte, []int) {
-	return file_cache_store_proto_rawDescGZIP(), []int{13}
+	return file_cache_store_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SearchScoresRequest) GetCollection() string {
@@ -773,7 +877,7 @@ type SearchScoresResponse struct {
 
 func (x *SearchScoresResponse) Reset() {
 	*x = SearchScoresResponse{}
-	mi := &file_cache_store_proto_msgTypes[14]
+	mi := &file_cache_store_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -785,7 +889,7 @@ func (x *SearchScoresResponse) String() string {
 func (*SearchScoresResponse) ProtoMessage() {}
 
 func (x *SearchScoresResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cache_store_proto_msgTypes[14]
+	mi := &file_cache_store_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -798,7 +902,7 @@ func (x *SearchScoresResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchScoresResponse.ProtoReflect.Descriptor instead.
 func (*SearchScoresResponse) Descriptor() ([]byte, []int) {
-	return file_cache_store_proto_rawDescGZIP(), []int{14}
+	return file_cache_store_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *SearchScoresResponse) GetDocuments() []*Score {
@@ -818,7 +922,7 @@ type DeleteScoresRequest struct {
 
 func (x *DeleteScoresRequest) Reset() {
 	*x = DeleteScoresRequest{}
-	mi := &file_cache_store_proto_msgTypes[15]
+	mi := &file_cache_store_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -830,7 +934,7 @@ func (x *DeleteScoresRequest) String() string {
 func (*DeleteScoresRequest) ProtoMessage() {}
 
 func (x *DeleteScoresRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cache_store_proto_msgTypes[15]
+	mi := &file_cache_store_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -843,7 +947,7 @@ func (x *DeleteScoresRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteScoresRequest.ProtoReflect.Descriptor instead.
 func (*DeleteScoresRequest) Descriptor() ([]byte, []int) {
-	return file_cache_store_proto_rawDescGZIP(), []int{15}
+	return file_cache_store_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *DeleteScoresRequest) GetCollection() []string {
@@ -868,7 +972,7 @@ type DeleteScoresResponse struct {
 
 func (x *DeleteScoresResponse) Reset() {
 	*x = DeleteScoresResponse{}
-	mi := &file_cache_store_proto_msgTypes[16]
+	mi := &file_cache_store_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -880,7 +984,7 @@ func (x *DeleteScoresResponse) String() string {
 func (*DeleteScoresResponse) ProtoMessage() {}
 
 func (x *DeleteScoresResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cache_store_proto_msgTypes[16]
+	mi := &file_cache_store_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -893,7 +997,7 @@ func (x *DeleteScoresResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteScoresResponse.ProtoReflect.Descriptor instead.
 func (*DeleteScoresResponse) Descriptor() ([]byte, []int) {
-	return file_cache_store_proto_rawDescGZIP(), []int{16}
+	return file_cache_store_proto_rawDescGZIP(), []int{18}
 }
 
 type UpdateScoresRequest struct {
@@ -908,7 +1012,7 @@ type UpdateScoresRequest struct {
 
 func (x *UpdateScoresRequest) Reset() {
 	*x = UpdateScoresRequest{}
-	mi := &file_cache_store_proto_msgTypes[17]
+	mi := &file_cache_store_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -920,7 +1024,7 @@ func (x *UpdateScoresRequest) String() string {
 func (*UpdateScoresRequest) ProtoMessage() {}
 
 func (x *UpdateScoresRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cache_store_proto_msgTypes[17]
+	mi := &file_cache_store_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -933,7 +1037,7 @@ func (x *UpdateScoresRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateScoresRequest.ProtoReflect.Descriptor instead.
 func (*UpdateScoresRequest) Descriptor() ([]byte, []int) {
-	return file_cache_store_proto_rawDescGZIP(), []int{17}
+	return file_cache_store_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *UpdateScoresRequest) GetCollection() []string {
@@ -972,7 +1076,7 @@ type UpdateScoresResponse struct {
 
 func (x *UpdateScoresResponse) Reset() {
 	*x = UpdateScoresResponse{}
-	mi := &file_cache_store_proto_msgTypes[18]
+	mi := &file_cache_store_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -984,7 +1088,7 @@ func (x *UpdateScoresResponse) String() string {
 func (*UpdateScoresResponse) ProtoMessage() {}
 
 func (x *UpdateScoresResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cache_store_proto_msgTypes[18]
+	mi := &file_cache_store_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -997,7 +1101,7 @@ func (x *UpdateScoresResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateScoresResponse.ProtoReflect.Descriptor instead.
 func (*UpdateScoresResponse) Descriptor() ([]byte, []int) {
-	return file_cache_store_proto_rawDescGZIP(), []int{18}
+	return file_cache_store_proto_rawDescGZIP(), []int{20}
 }
 
 type ScanScoresRequest struct {
@@ -1008,7 +1112,7 @@ type ScanScoresRequest struct {
 
 func (x *ScanScoresRequest) Reset() {
 	*x = ScanScoresRequest{}
-	mi := &file_cache_store_proto_msgTypes[19]
+	mi := &file_cache_store_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1020,7 +1124,7 @@ func (x *ScanScoresRequest) String() string {
 func (*ScanScoresRequest) ProtoMessage() {}
 
 func (x *ScanScoresRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cache_store_proto_msgTypes[19]
+	mi := &file_cache_store_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1033,7 +1137,7 @@ func (x *ScanScoresRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanScoresRequest.ProtoReflect.Descriptor instead.
 func (*ScanScoresRequest) Descriptor() ([]byte, []int) {
-	return file_cache_store_proto_rawDescGZIP(), []int{19}
+	return file_cache_store_proto_rawDescGZIP(), []int{21}
 }
 
 type ScanScoresResponse struct {
@@ -1048,7 +1152,7 @@ type ScanScoresResponse struct {
 
 func (x *ScanScoresResponse) Reset() {
 	*x = ScanScoresResponse{}
-	mi := &file_cache_store_proto_msgTypes[20]
+	mi := &file_cache_store_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1060,7 +1164,7 @@ func (x *ScanScoresResponse) String() string {
 func (*ScanScoresResponse) ProtoMessage() {}
 
 func (x *ScanScoresResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cache_store_proto_msgTypes[20]
+	mi := &file_cache_store_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1073,7 +1177,7 @@ func (x *ScanScoresResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScanScoresResponse.ProtoReflect.Descriptor instead.
 func (*ScanScoresResponse) Descriptor() ([]byte, []int) {
-	return file_cache_store_proto_rawDescGZIP(), []int{20}
+	return file_cache_store_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ScanScoresResponse) GetCollection() string {
@@ -1113,7 +1217,7 @@ type AddTimeSeriesPointsRequest struct {
 
 func (x *AddTimeSeriesPointsRequest) Reset() {
 	*x = AddTimeSeriesPointsRequest{}
-	mi := &file_cache_store_proto_msgTypes[21]
+	mi := &file_cache_store_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1125,7 +1229,7 @@ func (x *AddTimeSeriesPointsRequest) String() string {
 func (*AddTimeSeriesPointsRequest) ProtoMessage() {}
 
 func (x *AddTimeSeriesPointsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cache_store_proto_msgTypes[21]
+	mi := &file_cache_store_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1138,7 +1242,7 @@ func (x *AddTimeSeriesPointsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddTimeSeriesPointsRequest.ProtoReflect.Descriptor instead.
 func (*AddTimeSeriesPointsRequest) Descriptor() ([]byte, []int) {
-	return file_cache_store_proto_rawDescGZIP(), []int{21}
+	return file_cache_store_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *AddTimeSeriesPointsRequest) GetPoints() []*TimeSeriesPoint {
@@ -1156,7 +1260,7 @@ type AddTimeSeriesPointsResponse struct {
 
 func (x *AddTimeSeriesPointsResponse) Reset() {
 	*x = AddTimeSeriesPointsResponse{}
-	mi := &file_cache_store_proto_msgTypes[22]
+	mi := &file_cache_store_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1168,7 +1272,7 @@ func (x *AddTimeSeriesPointsResponse) String() string {
 func (*AddTimeSeriesPointsResponse) ProtoMessage() {}
 
 func (x *AddTimeSeriesPointsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cache_store_proto_msgTypes[22]
+	mi := &file_cache_store_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1181,7 +1285,7 @@ func (x *AddTimeSeriesPointsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddTimeSeriesPointsResponse.ProtoReflect.Descriptor instead.
 func (*AddTimeSeriesPointsResponse) Descriptor() ([]byte, []int) {
-	return file_cache_store_proto_rawDescGZIP(), []int{22}
+	return file_cache_store_proto_rawDescGZIP(), []int{24}
 }
 
 type GetTimeSeriesPointsRequest struct {
@@ -1196,7 +1300,7 @@ type GetTimeSeriesPointsRequest struct {
 
 func (x *GetTimeSeriesPointsRequest) Reset() {
 	*x = GetTimeSeriesPointsRequest{}
-	mi := &file_cache_store_proto_msgTypes[23]
+	mi := &file_cache_store_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1208,7 +1312,7 @@ func (x *GetTimeSeriesPointsRequest) String() string {
 func (*GetTimeSeriesPointsRequest) ProtoMessage() {}
 
 func (x *GetTimeSeriesPointsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_cache_store_proto_msgTypes[23]
+	mi := &file_cache_store_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1221,7 +1325,7 @@ func (x *GetTimeSeriesPointsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTimeSeriesPointsRequest.ProtoReflect.Descriptor instead.
 func (*GetTimeSeriesPointsRequest) Descriptor() ([]byte, []int) {
-	return file_cache_store_proto_rawDescGZIP(), []int{23}
+	return file_cache_store_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *GetTimeSeriesPointsRequest) GetName() string {
@@ -1261,7 +1365,7 @@ type GetTimeSeriesPointsResponse struct {
 
 func (x *GetTimeSeriesPointsResponse) Reset() {
 	*x = GetTimeSeriesPointsResponse{}
-	mi := &file_cache_store_proto_msgTypes[24]
+	mi := &file_cache_store_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1273,7 +1377,7 @@ func (x *GetTimeSeriesPointsResponse) String() string {
 func (*GetTimeSeriesPointsResponse) ProtoMessage() {}
 
 func (x *GetTimeSeriesPointsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_cache_store_proto_msgTypes[24]
+	mi := &file_cache_store_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1286,7 +1390,7 @@ func (x *GetTimeSeriesPointsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTimeSeriesPointsResponse.ProtoReflect.Descriptor instead.
 func (*GetTimeSeriesPointsResponse) Descriptor() ([]byte, []int) {
-	return file_cache_store_proto_rawDescGZIP(), []int{24}
+	return file_cache_store_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *GetTimeSeriesPointsResponse) GetPoints() []*TimeSeriesPoint {
@@ -1352,7 +1456,15 @@ const file_cache_store_proto_rawDesc = "" +
 	"collection\x12\x16\n" +
 	"\x06subset\x18\x02 \x01(\tR\x06subset\x12-\n" +
 	"\tdocuments\x18\x03 \x03(\v2\x0f.protocol.ScoreR\tdocuments\"\x13\n" +
-	"\x11AddScoresResponse\"\x8b\x01\n" +
+	"\x11AddScoresResponse\"\\\n" +
+	"\x10GetScoresRequest\x12\x1e\n" +
+	"\n" +
+	"collection\x18\x01 \x01(\tR\n" +
+	"collection\x12\x16\n" +
+	"\x06subset\x18\x02 \x01(\tR\x06subset\x12\x10\n" +
+	"\x03ids\x18\x03 \x03(\tR\x03ids\"B\n" +
+	"\x11GetScoresResponse\x12-\n" +
+	"\tdocuments\x18\x01 \x03(\v2\x0f.protocol.ScoreR\tdocuments\"\x8b\x01\n" +
 	"\x13SearchScoresRequest\x12\x1e\n" +
 	"\n" +
 	"collection\x18\x01 \x01(\tR\n" +
@@ -1395,14 +1507,15 @@ const file_cache_store_proto_rawDesc = "" +
 	"\x03end\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x03end\x12\x1a\n" +
 	"\bduration\x18\x04 \x01(\x03R\bduration\"P\n" +
 	"\x1bGetTimeSeriesPointsResponse\x121\n" +
-	"\x06points\x18\x01 \x03(\v2\x19.protocol.TimeSeriesPointR\x06points2\xc4\x06\n" +
+	"\x06points\x18\x01 \x03(\v2\x19.protocol.TimeSeriesPointR\x06points2\x8c\a\n" +
 	"\n" +
 	"CacheStore\x127\n" +
 	"\x04Ping\x12\x15.protocol.PingRequest\x1a\x16.protocol.PingResponse\"\x00\x124\n" +
 	"\x03Get\x12\x14.protocol.GetRequest\x1a\x15.protocol.GetResponse\"\x00\x124\n" +
 	"\x03Set\x12\x14.protocol.SetRequest\x1a\x15.protocol.SetResponse\"\x00\x12=\n" +
 	"\x06Delete\x12\x17.protocol.DeleteRequest\x1a\x18.protocol.DeleteResponse\"\x00\x12F\n" +
-	"\tAddScores\x12\x1a.protocol.AddScoresRequest\x1a\x1b.protocol.AddScoresResponse\"\x00\x12O\n" +
+	"\tAddScores\x12\x1a.protocol.AddScoresRequest\x1a\x1b.protocol.AddScoresResponse\"\x00\x12F\n" +
+	"\tGetScores\x12\x1a.protocol.GetScoresRequest\x1a\x1b.protocol.GetScoresResponse\"\x00\x12O\n" +
 	"\fSearchScores\x12\x1d.protocol.SearchScoresRequest\x1a\x1e.protocol.SearchScoresResponse\"\x00\x12O\n" +
 	"\fDeleteScores\x12\x1d.protocol.DeleteScoresRequest\x1a\x1e.protocol.DeleteScoresResponse\"\x00\x12O\n" +
 	"\fUpdateScores\x12\x1d.protocol.UpdateScoresRequest\x1a\x1e.protocol.UpdateScoresResponse\"\x00\x12K\n" +
@@ -1423,7 +1536,7 @@ func file_cache_store_proto_rawDescGZIP() []byte {
 	return file_cache_store_proto_rawDescData
 }
 
-var file_cache_store_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_cache_store_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_cache_store_proto_goTypes = []any{
 	(*Value)(nil),                       // 0: protocol.Value
 	(*Score)(nil),                       // 1: protocol.Score
@@ -1438,63 +1551,68 @@ var file_cache_store_proto_goTypes = []any{
 	(*DeleteResponse)(nil),              // 10: protocol.DeleteResponse
 	(*AddScoresRequest)(nil),            // 11: protocol.AddScoresRequest
 	(*AddScoresResponse)(nil),           // 12: protocol.AddScoresResponse
-	(*SearchScoresRequest)(nil),         // 13: protocol.SearchScoresRequest
-	(*SearchScoresResponse)(nil),        // 14: protocol.SearchScoresResponse
-	(*DeleteScoresRequest)(nil),         // 15: protocol.DeleteScoresRequest
-	(*DeleteScoresResponse)(nil),        // 16: protocol.DeleteScoresResponse
-	(*UpdateScoresRequest)(nil),         // 17: protocol.UpdateScoresRequest
-	(*UpdateScoresResponse)(nil),        // 18: protocol.UpdateScoresResponse
-	(*ScanScoresRequest)(nil),           // 19: protocol.ScanScoresRequest
-	(*ScanScoresResponse)(nil),          // 20: protocol.ScanScoresResponse
-	(*AddTimeSeriesPointsRequest)(nil),  // 21: protocol.AddTimeSeriesPointsRequest
-	(*AddTimeSeriesPointsResponse)(nil), // 22: protocol.AddTimeSeriesPointsResponse
-	(*GetTimeSeriesPointsRequest)(nil),  // 23: protocol.GetTimeSeriesPointsRequest
-	(*GetTimeSeriesPointsResponse)(nil), // 24: protocol.GetTimeSeriesPointsResponse
-	(*timestamppb.Timestamp)(nil),       // 25: google.protobuf.Timestamp
-	(*PingRequest)(nil),                 // 26: protocol.PingRequest
-	(*PingResponse)(nil),                // 27: protocol.PingResponse
+	(*GetScoresRequest)(nil),            // 13: protocol.GetScoresRequest
+	(*GetScoresResponse)(nil),           // 14: protocol.GetScoresResponse
+	(*SearchScoresRequest)(nil),         // 15: protocol.SearchScoresRequest
+	(*SearchScoresResponse)(nil),        // 16: protocol.SearchScoresResponse
+	(*DeleteScoresRequest)(nil),         // 17: protocol.DeleteScoresRequest
+	(*DeleteScoresResponse)(nil),        // 18: protocol.DeleteScoresResponse
+	(*UpdateScoresRequest)(nil),         // 19: protocol.UpdateScoresRequest
+	(*UpdateScoresResponse)(nil),        // 20: protocol.UpdateScoresResponse
+	(*ScanScoresRequest)(nil),           // 21: protocol.ScanScoresRequest
+	(*ScanScoresResponse)(nil),          // 22: protocol.ScanScoresResponse
+	(*AddTimeSeriesPointsRequest)(nil),  // 23: protocol.AddTimeSeriesPointsRequest
+	(*AddTimeSeriesPointsResponse)(nil), // 24: protocol.AddTimeSeriesPointsResponse
+	(*GetTimeSeriesPointsRequest)(nil),  // 25: protocol.GetTimeSeriesPointsRequest
+	(*GetTimeSeriesPointsResponse)(nil), // 26: protocol.GetTimeSeriesPointsResponse
+	(*timestamppb.Timestamp)(nil),       // 27: google.protobuf.Timestamp
+	(*PingRequest)(nil),                 // 28: protocol.PingRequest
+	(*PingResponse)(nil),                // 29: protocol.PingResponse
 }
 var file_cache_store_proto_depIdxs = []int32{
-	25, // 0: protocol.Score.timestamp:type_name -> google.protobuf.Timestamp
-	25, // 1: protocol.ScoreCondition.before:type_name -> google.protobuf.Timestamp
-	25, // 2: protocol.TimeSeriesPoint.timestamp:type_name -> google.protobuf.Timestamp
+	27, // 0: protocol.Score.timestamp:type_name -> google.protobuf.Timestamp
+	27, // 1: protocol.ScoreCondition.before:type_name -> google.protobuf.Timestamp
+	27, // 2: protocol.TimeSeriesPoint.timestamp:type_name -> google.protobuf.Timestamp
 	0,  // 3: protocol.SetRequest.values:type_name -> protocol.Value
 	1,  // 4: protocol.AddScoresRequest.documents:type_name -> protocol.Score
-	1,  // 5: protocol.SearchScoresResponse.documents:type_name -> protocol.Score
-	2,  // 6: protocol.DeleteScoresRequest.condition:type_name -> protocol.ScoreCondition
-	3,  // 7: protocol.UpdateScoresRequest.patch:type_name -> protocol.ScorePatch
-	25, // 8: protocol.ScanScoresResponse.timestamp:type_name -> google.protobuf.Timestamp
-	4,  // 9: protocol.AddTimeSeriesPointsRequest.points:type_name -> protocol.TimeSeriesPoint
-	25, // 10: protocol.GetTimeSeriesPointsRequest.begin:type_name -> google.protobuf.Timestamp
-	25, // 11: protocol.GetTimeSeriesPointsRequest.end:type_name -> google.protobuf.Timestamp
-	4,  // 12: protocol.GetTimeSeriesPointsResponse.points:type_name -> protocol.TimeSeriesPoint
-	26, // 13: protocol.CacheStore.Ping:input_type -> protocol.PingRequest
-	5,  // 14: protocol.CacheStore.Get:input_type -> protocol.GetRequest
-	7,  // 15: protocol.CacheStore.Set:input_type -> protocol.SetRequest
-	9,  // 16: protocol.CacheStore.Delete:input_type -> protocol.DeleteRequest
-	11, // 17: protocol.CacheStore.AddScores:input_type -> protocol.AddScoresRequest
-	13, // 18: protocol.CacheStore.SearchScores:input_type -> protocol.SearchScoresRequest
-	15, // 19: protocol.CacheStore.DeleteScores:input_type -> protocol.DeleteScoresRequest
-	17, // 20: protocol.CacheStore.UpdateScores:input_type -> protocol.UpdateScoresRequest
-	19, // 21: protocol.CacheStore.ScanScores:input_type -> protocol.ScanScoresRequest
-	21, // 22: protocol.CacheStore.AddTimeSeriesPoints:input_type -> protocol.AddTimeSeriesPointsRequest
-	23, // 23: protocol.CacheStore.GetTimeSeriesPoints:input_type -> protocol.GetTimeSeriesPointsRequest
-	27, // 24: protocol.CacheStore.Ping:output_type -> protocol.PingResponse
-	6,  // 25: protocol.CacheStore.Get:output_type -> protocol.GetResponse
-	8,  // 26: protocol.CacheStore.Set:output_type -> protocol.SetResponse
-	10, // 27: protocol.CacheStore.Delete:output_type -> protocol.DeleteResponse
-	12, // 28: protocol.CacheStore.AddScores:output_type -> protocol.AddScoresResponse
-	14, // 29: protocol.CacheStore.SearchScores:output_type -> protocol.SearchScoresResponse
-	16, // 30: protocol.CacheStore.DeleteScores:output_type -> protocol.DeleteScoresResponse
-	18, // 31: protocol.CacheStore.UpdateScores:output_type -> protocol.UpdateScoresResponse
-	20, // 32: protocol.CacheStore.ScanScores:output_type -> protocol.ScanScoresResponse
-	22, // 33: protocol.CacheStore.AddTimeSeriesPoints:output_type -> protocol.AddTimeSeriesPointsResponse
-	24, // 34: protocol.CacheStore.GetTimeSeriesPoints:output_type -> protocol.GetTimeSeriesPointsResponse
-	24, // [24:35] is the sub-list for method output_type
-	13, // [13:24] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	1,  // 5: protocol.GetScoresResponse.documents:type_name -> protocol.Score
+	1,  // 6: protocol.SearchScoresResponse.documents:type_name -> protocol.Score
+	2,  // 7: protocol.DeleteScoresRequest.condition:type_name -> protocol.ScoreCondition
+	3,  // 8: protocol.UpdateScoresRequest.patch:type_name -> protocol.ScorePatch
+	27, // 9: protocol.ScanScoresResponse.timestamp:type_name -> google.protobuf.Timestamp
+	4,  // 10: protocol.AddTimeSeriesPointsRequest.points:type_name -> protocol.TimeSeriesPoint
+	27, // 11: protocol.GetTimeSeriesPointsRequest.begin:type_name -> google.protobuf.Timestamp
+	27, // 12: protocol.GetTimeSeriesPointsRequest.end:type_name -> google.protobuf.Timestamp
+	4,  // 13: protocol.GetTimeSeriesPointsResponse.points:type_name -> protocol.TimeSeriesPoint
+	28, // 14: protocol.CacheStore.Ping:input_type -> protocol.PingRequest
+	5,  // 15: protocol.CacheStore.Get:input_type -> protocol.GetRequest
+	7,  // 16: protocol.CacheStore.Set:input_type -> protocol.SetRequest
+	9,  // 17: protocol.CacheStore.Delete:input_type -> protocol.DeleteRequest
+	11, // 18: protocol.CacheStore.AddScores:input_type -> protocol.AddScoresRequest
+	13, // 19: protocol.CacheStore.GetScores:input_type -> protocol.GetScoresRequest
+	15, // 20: protocol.CacheStore.SearchScores:input_type -> protocol.SearchScoresRequest
+	17, // 21: protocol.CacheStore.DeleteScores:input_type -> protocol.DeleteScoresRequest
+	19, // 22: protocol.CacheStore.UpdateScores:input_type -> protocol.UpdateScoresRequest
+	21, // 23: protocol.CacheStore.ScanScores:input_type -> protocol.ScanScoresRequest
+	23, // 24: protocol.CacheStore.AddTimeSeriesPoints:input_type -> protocol.AddTimeSeriesPointsRequest
+	25, // 25: protocol.CacheStore.GetTimeSeriesPoints:input_type -> protocol.GetTimeSeriesPointsRequest
+	29, // 26: protocol.CacheStore.Ping:output_type -> protocol.PingResponse
+	6,  // 27: protocol.CacheStore.Get:output_type -> protocol.GetResponse
+	8,  // 28: protocol.CacheStore.Set:output_type -> protocol.SetResponse
+	10, // 29: protocol.CacheStore.Delete:output_type -> protocol.DeleteResponse
+	12, // 30: protocol.CacheStore.AddScores:output_type -> protocol.AddScoresResponse
+	14, // 31: protocol.CacheStore.GetScores:output_type -> protocol.GetScoresResponse
+	16, // 32: protocol.CacheStore.SearchScores:output_type -> protocol.SearchScoresResponse
+	18, // 33: protocol.CacheStore.DeleteScores:output_type -> protocol.DeleteScoresResponse
+	20, // 34: protocol.CacheStore.UpdateScores:output_type -> protocol.UpdateScoresResponse
+	22, // 35: protocol.CacheStore.ScanScores:output_type -> protocol.ScanScoresResponse
+	24, // 36: protocol.CacheStore.AddTimeSeriesPoints:output_type -> protocol.AddTimeSeriesPointsResponse
+	26, // 37: protocol.CacheStore.GetTimeSeriesPoints:output_type -> protocol.GetTimeSeriesPointsResponse
+	26, // [26:38] is the sub-list for method output_type
+	14, // [14:26] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_cache_store_proto_init() }
@@ -1506,14 +1624,14 @@ func file_cache_store_proto_init() {
 	file_cache_store_proto_msgTypes[2].OneofWrappers = []any{}
 	file_cache_store_proto_msgTypes[3].OneofWrappers = []any{}
 	file_cache_store_proto_msgTypes[6].OneofWrappers = []any{}
-	file_cache_store_proto_msgTypes[17].OneofWrappers = []any{}
+	file_cache_store_proto_msgTypes[19].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cache_store_proto_rawDesc), len(file_cache_store_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   25,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

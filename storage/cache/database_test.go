@@ -246,8 +246,26 @@ func (suite *baseTestSuite) TestDocument() {
 	}})
 	suite.NoError(err)
 
+	// get documents by exact IDs
+	documents, err := suite.GetScores(ctx, "a", "", []string{"5", "missing", "0", "2"})
+	suite.NoError(err)
+	suite.ElementsMatch([]Score{
+		{Id: "5", Score: 5, Categories: []string{"b"}, Timestamp: ts},
+		{Id: "2", Score: 2, Categories: []string{"b", "c"}, Timestamp: ts},
+	}, documents)
+	documents, err = suite.GetScores(ctx, "a", "other", []string{"5", "2"})
+	suite.NoError(err)
+	suite.Empty(documents)
+	documents, err = suite.GetScores(ctx, "a", "", nil)
+	suite.NoError(err)
+	suite.Empty(documents)
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	_, err = suite.GetScores(canceled, "a", "", []string{"2"})
+	suite.Error(err)
+
 	// search documents
-	documents, err := suite.SearchScores(ctx, "a", "", []string{"b"}, 1, 3)
+	documents, err = suite.SearchScores(ctx, "a", "", []string{"b"}, 1, 3)
 	suite.NoError(err)
 	suite.Equal([]Score{
 		{Id: "3", Score: 3, Categories: []string{"b"}, Timestamp: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)},

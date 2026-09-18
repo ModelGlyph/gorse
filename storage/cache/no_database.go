@@ -64,6 +64,10 @@ func (NoDatabase) AddScores(_ context.Context, _, _ string, _ []Score) error {
 	return storage.ErrNoDatabase
 }
 
+func (NoDatabase) GetScores(_ context.Context, _, _ string, _ []string) ([]Score, error) {
+	return nil, storage.ErrNoDatabase
+}
+
 func (NoDatabase) SearchScores(_ context.Context, _, _ string, _ []string, _, _ int) ([]Score, error) {
 	return nil, storage.ErrNoDatabase
 }

@@ -38,6 +38,7 @@ const (
 	CacheStore_Set_FullMethodName                 = "/protocol.CacheStore/Set"
 	CacheStore_Delete_FullMethodName              = "/protocol.CacheStore/Delete"
 	CacheStore_AddScores_FullMethodName           = "/protocol.CacheStore/AddScores"
+	CacheStore_GetScores_FullMethodName           = "/protocol.CacheStore/GetScores"
 	CacheStore_SearchScores_FullMethodName        = "/protocol.CacheStore/SearchScores"
 	CacheStore_DeleteScores_FullMethodName        = "/protocol.CacheStore/DeleteScores"
 	CacheStore_UpdateScores_FullMethodName        = "/protocol.CacheStore/UpdateScores"
@@ -55,6 +56,7 @@ type CacheStoreClient interface {
 	Set(ctx context.Context, in *SetRequest, opts ...grpc.CallOption) (*SetResponse, error)
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*DeleteResponse, error)
 	AddScores(ctx context.Context, in *AddScoresRequest, opts ...grpc.CallOption) (*AddScoresResponse, error)
+	GetScores(ctx context.Context, in *GetScoresRequest, opts ...grpc.CallOption) (*GetScoresResponse, error)
 	SearchScores(ctx context.Context, in *SearchScoresRequest, opts ...grpc.CallOption) (*SearchScoresResponse, error)
 	DeleteScores(ctx context.Context, in *DeleteScoresRequest, opts ...grpc.CallOption) (*DeleteScoresResponse, error)
 	UpdateScores(ctx context.Context, in *UpdateScoresRequest, opts ...grpc.CallOption) (*UpdateScoresResponse, error)
@@ -115,6 +117,16 @@ func (c *cacheStoreClient) AddScores(ctx context.Context, in *AddScoresRequest, 
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AddScoresResponse)
 	err := c.cc.Invoke(ctx, CacheStore_AddScores_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *cacheStoreClient) GetScores(ctx context.Context, in *GetScoresRequest, opts ...grpc.CallOption) (*GetScoresResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetScoresResponse)
+	err := c.cc.Invoke(ctx, CacheStore_GetScores_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -199,6 +211,7 @@ type CacheStoreServer interface {
 	Set(context.Context, *SetRequest) (*SetResponse, error)
 	Delete(context.Context, *DeleteRequest) (*DeleteResponse, error)
 	AddScores(context.Context, *AddScoresRequest) (*AddScoresResponse, error)
+	GetScores(context.Context, *GetScoresRequest) (*GetScoresResponse, error)
 	SearchScores(context.Context, *SearchScoresRequest) (*SearchScoresResponse, error)
 	DeleteScores(context.Context, *DeleteScoresRequest) (*DeleteScoresResponse, error)
 	UpdateScores(context.Context, *UpdateScoresRequest) (*UpdateScoresResponse, error)
@@ -229,6 +242,9 @@ func (UnimplementedCacheStoreServer) Delete(context.Context, *DeleteRequest) (*D
 }
 func (UnimplementedCacheStoreServer) AddScores(context.Context, *AddScoresRequest) (*AddScoresResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AddScores not implemented")
+}
+func (UnimplementedCacheStoreServer) GetScores(context.Context, *GetScoresRequest) (*GetScoresResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetScores not implemented")
 }
 func (UnimplementedCacheStoreServer) SearchScores(context.Context, *SearchScoresRequest) (*SearchScoresResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SearchScores not implemented")
@@ -355,6 +371,24 @@ func _CacheStore_AddScores_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(CacheStoreServer).AddScores(ctx, req.(*AddScoresRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _CacheStore_GetScores_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetScoresRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CacheStoreServer).GetScores(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CacheStore_GetScores_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CacheStoreServer).GetScores(ctx, req.(*GetScoresRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -486,6 +520,10 @@ var CacheStore_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AddScores",
 			Handler:    _CacheStore_AddScores_Handler,
+		},
+		{
+			MethodName: "GetScores",
+			Handler:    _CacheStore_GetScores_Handler,
 		},
 		{
 			MethodName: "SearchScores",
