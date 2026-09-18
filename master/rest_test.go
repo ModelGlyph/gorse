@@ -50,6 +50,7 @@ import (
 const (
 	mockMasterUsername = "admin"
 	mockMasterPassword = "pass"
+	mockServerAPIKey   = "server-api-key"
 )
 
 func marshal(t *testing.T, v any) string {
@@ -115,6 +116,7 @@ func (suite *MasterAPITestSuite) SetupTest() {
 	// create server
 	suite.Config.Master.DashboardUserName = mockMasterUsername
 	suite.Config.Master.DashboardPassword = mockMasterPassword
+	suite.Config.Server.APIKey = mockServerAPIKey
 	suite.WebService = new(restful.WebService)
 	suite.CreateWebService()
 	suite.RestServer.CreateWebService()
@@ -141,6 +143,64 @@ func (suite *MasterAPITestSuite) SetupTest() {
 	suite.login(resp, req)
 	suite.Equal(http.StatusFound, resp.Code)
 	suite.cookie = resp.Header().Get("Set-Cookie")
+}
+
+func (suite *MasterAPITestSuite) TestCandidateRankRequiresServerAPIKey() {
+	observedLogs := log.SetTestLoggerWithObserver(suite.T())
+
+	recommender := config.NonPersonalizedConfig{
+		Name:              "candidate_rank",
+		Score:             "len(feedback)",
+		CandidateComplete: true,
+	}
+	suite.Config.Recommend.NonPersonalized = []config.NonPersonalizedConfig{recommender}
+	generation := time.Date(2026, 9, 19, 1, 2, 3, 456000000, time.UTC)
+	suite.Require().NoError(suite.CacheClient.AddScores(suite.T().Context(),
+		cache.NonPersonalizedCandidateScores, recommender.Name, []cache.Score{
+			{Id: "a", Score: 1, Timestamp: generation},
+		}))
+	suite.Require().NoError(suite.CacheClient.Set(suite.T().Context(), cache.String(
+		cache.Key(cache.NonPersonalizedCandidateGeneration, recommender.Name),
+		cache.EncodeCandidateGeneration(generation, recommender.Hash()),
+	)))
+
+	request := func(key, cookie string, status int) {
+		test := apitest.New().
+			Handler(suite.handler).
+			Post("/api/non-personalized/candidate_rank/candidate-rank").
+			JSON(`{"item_ids":["a"]}`)
+		if key != "" {
+			test.Header("X-API-Key", key)
+		}
+		if cookie != "" {
+			test.Header("Cookie", cookie)
+		}
+		test.Expect(suite.T()).Status(status).End()
+	}
+	wrongKeyCanary := "wrong-server-api-key-canary"
+	request(mockServerAPIKey, "", http.StatusOK)
+	request(wrongKeyCanary, "", http.StatusUnauthorized)
+	request("", "", http.StatusUnauthorized)
+	request(wrongKeyCanary, suite.cookie, http.StatusUnauthorized)
+	request("", suite.cookie, http.StatusUnauthorized)
+
+	apitest.New().
+		Handler(suite.handler).
+		Get("/api/items").
+		Header("Cookie", suite.cookie).
+		Expect(suite.T()).
+		Status(http.StatusOK).
+		End()
+
+	for _, entry := range observedLogs.All() {
+		suite.NotContains(entry.Message, wrongKeyCanary)
+		suite.NotContains(entry.Message, mockServerAPIKey)
+		for _, value := range entry.ContextMap() {
+			text := fmt.Sprint(value)
+			suite.NotContains(text, wrongKeyCanary)
+			suite.NotContains(text, mockServerAPIKey)
+		}
+	}
 }
 
 func (suite *MasterAPITestSuite) TearDownTest() {
