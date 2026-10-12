@@ -162,7 +162,7 @@ func (db *Milvus) AddCollection(ctx context.Context, name string, dimensions int
 	if dimensions == 0 {
 		schema.WithField(entity.NewField().WithName(milvusVectorField).WithDataType(entity.FieldTypeSparseVector))
 	} else {
-		schema.WithField(entity.NewField().WithName(milvusVectorField).WithDataType(entity.FieldTypeFloatVector).WithDim(int64(dimensions)))
+		schema.WithField(entity.NewField().WithName(milvusVectorField).WithDataType(entity.FieldTypeFloat16Vector).WithDim(int64(dimensions)))
 	}
 
 	err := db.client.CreateCollection(ctx, milvusclient.NewCreateCollectionOption(name, schema).WithShardNum(entity.DefaultShardNumber))
@@ -270,20 +270,21 @@ func (db *Milvus) AddVectors(ctx context.Context, collection string, vectors []V
 	categories := make([][]string, 0, len(vectors))
 	hidden := make([]bool, 0, len(vectors))
 	timestamps := make([]int64, 0, len(vectors))
-	data := make([][]float32, 0, len(vectors))
+	data := make([][]byte, 0, len(vectors))
 	sparseData := make([]entity.SparseEmbedding, 0, len(vectors))
 	for _, v := range vectors {
 		ids = append(ids, v.Id)
 		categories = append(categories, v.Categories)
 		hidden = append(hidden, v.IsHidden)
 		timestamps = append(timestamps, v.Timestamp.UnixMilli())
-		data = append(data, v.Values)
-		if len(v.Indices) > 0 {
+		if v.IsSparse() {
 			sparse, err := entity.NewSliceSparseEmbedding(v.Indices, v.Values)
 			if err != nil {
 				return errors.WithStack(err)
 			}
 			sparseData = append(sparseData, sparse)
+		} else {
+			data = append(data, Float16Bytes(v.Float16Values()))
 		}
 	}
 
@@ -298,7 +299,7 @@ func (db *Milvus) AddVectors(ctx context.Context, collection string, vectors []V
 		}
 		vectorCol = column.NewColumnSparseVectors(milvusVectorField, sparseData)
 	} else {
-		vectorCol = column.NewColumnFloatVector(milvusVectorField, len(data[0]), data)
+		vectorCol = column.NewColumnFloat16Vector(milvusVectorField, len(data[0])/2, data)
 	}
 
 	_, err := db.client.Upsert(ctx, milvusclient.NewColumnBasedInsertOption(collection, idCol, categoriesCol, hiddenCol, timestampCol, vectorCol))
@@ -362,12 +363,12 @@ func milvusVectors(collection string, ids []string, result milvusclient.ResultSe
 			Timestamp:  time.UnixMilli(timestamp).UTC(),
 		}
 		switch values := vectorCol.(type) {
-		case *column.ColumnFloatVector:
+		case *column.ColumnFloat16Vector:
 			value, err := values.Value(i)
 			if err != nil {
 				return nil, errors.WithStack(err)
 			}
-			vector.Values = []float32(value)
+			vector.Values = []float32(value.ToFloat32Vector())
 		case *column.ColumnSparseFloatVector:
 			value, err := values.Value(i)
 			if err != nil {
@@ -410,13 +411,13 @@ func (db *Milvus) QueryVectors(ctx context.Context, collection string, q Vector,
 		return nil, errors.WithStack(err)
 	}
 	var query entity.Vector
-	if len(q.Indices) > 0 {
+	if q.IsSparse() {
 		query, err = entity.NewSliceSparseEmbedding(q.Indices, q.Values)
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}
 	} else {
-		query = entity.FloatVector(q.Values)
+		query = entity.Float16Vector(Float16Bytes(q.Float16Values()))
 	}
 	searchOption := milvusclient.NewSearchOption(collection, topK, []entity.Vector{query}).
 		WithANNSField(milvusVectorField).
@@ -485,12 +486,10 @@ func (db *Milvus) QueryVectors(ctx context.Context, collection string, q Vector,
 				score = -score
 			}
 			vectors = append(vectors, ScoredVector{
-				Vector: Vector{
-					Id:         id,
-					IsHidden:   hidden,
-					Categories: cats,
-				},
-				Score: score,
+				Id:         id,
+				IsHidden:   hidden,
+				Categories: cats,
+				Score:      score,
 			})
 		}
 	}

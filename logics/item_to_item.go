@@ -22,7 +22,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
-	"github.com/gorse-io/gorse/common/bfloats"
+	"github.com/gorse-io/gorse/common/floats"
 	"github.com/gorse-io/gorse/common/log"
 	"github.com/gorse-io/gorse/config"
 	"github.com/gorse-io/gorse/dataset"
@@ -144,25 +144,25 @@ func (e *embeddingItemToItem) Add(item *data.Item, _ []int32) error {
 	}
 	return e.VectorWriter.Add(vectors.Vector{
 		Id:         item.ItemId,
-		Values:     embedding,
+		HValues:    embedding,
 		IsHidden:   item.IsHidden,
 		Categories: item.Categories,
 		Timestamp:  e.timestamp,
 	})
 }
 
-func ExtractItemEmbedding(item *data.Item, columnFunc *vm.Program) ([]float32, bool) {
+func ExtractItemEmbedding(item *data.Item, columnFunc *vm.Program) ([]uint16, bool) {
 	result, err := expr.Run(columnFunc, map[string]any{"item": item})
 	if err != nil {
 		log.Logger().Error("failed to evaluate column expression", zap.Any("item", item), zap.Error(err))
 		return nil, false
 	}
-	v, ok := bfloats.FromAny(result)
+	v, ok := floats.FromAny(result)
 	if !ok {
-		log.Logger().Error("failed to convert column to BF16 slice", zap.Any("column", result))
+		log.Logger().Error("failed to convert column to FP16 slice", zap.Any("column", result))
 		return nil, false
 	}
-	return bfloats.ToFloat32(v), true
+	return v, true
 }
 
 type tagsItemToItem struct {

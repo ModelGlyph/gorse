@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/gorse-io/gorse/common/event"
 	"github.com/gorse-io/gorse/common/expression"
 	"github.com/gorse-io/gorse/common/log"
+	"github.com/gorse-io/gorse/common/mock"
 	"github.com/gorse-io/gorse/config"
 	"github.com/gorse-io/gorse/storage"
 	"github.com/gorse-io/gorse/storage/cache"
@@ -105,17 +107,22 @@ func (suite *ServerTestSuite) marshal(v any) string {
 }
 
 type requestsHandler struct {
+	ctx      context.Context
 	requests chan event.Request
 }
 
 func (h *requestsHandler) EmitRequest(_ context.Context, request event.Request) {
-	h.requests <- request
+	select {
+	case h.requests <- request:
+	case <-h.ctx.Done():
+	}
 }
 
 func (h *requestsHandler) EmitSnapshot(context.Context, event.Snapshot) {}
 
 func (suite *ServerTestSuite) TestEmitRequest() {
 	handler := &requestsHandler{
+		ctx:      suite.T().Context(),
 		requests: make(chan event.Request, 1),
 	}
 	event.SetEventHandler(handler)
@@ -137,20 +144,31 @@ func (suite *ServerTestSuite) TestEmitRequest() {
 	responseBytes, err := io.ReadAll(result.Response.Body)
 	suite.Require().NoError(err)
 
-	select {
-	case req := <-handler.requests:
-		suite.Equal(result.Response.Header.Get("X-Request-ID"), req.RequestID)
-		suite.EqualValues(len(body), req.RequestBytes)
-		suite.Equal(http.MethodPost, req.Method)
-		suite.Equal("/api/user", req.Route)
-		suite.Equal(http.StatusOK, req.StatusCode)
-		suite.Positive(req.ResponseTime)
-		suite.EqualValues(len(responseBytes), req.ResponseBytes)
-		suite.False(req.Timestamp.Before(before))
-		suite.False(req.Timestamp.After(after))
-		suite.Empty(req.RemoteAddr)
-	case <-time.After(time.Second):
-		suite.Fail("request event was not emitted")
+	requestID := result.Response.Header.Get("X-Request-ID")
+	suite.Require().NotEmpty(requestID)
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case req := <-handler.requests:
+			if req.RequestID != requestID {
+				continue
+			}
+			suite.Equal(requestID, req.RequestID)
+			suite.EqualValues(len(body), req.RequestBytes)
+			suite.Equal(http.MethodPost, req.Method)
+			suite.Equal("/api/user", req.Route)
+			suite.Equal(http.StatusOK, req.StatusCode)
+			suite.Positive(req.ResponseTime)
+			suite.EqualValues(len(responseBytes), req.ResponseBytes)
+			suite.False(req.Timestamp.Before(before))
+			suite.False(req.Timestamp.After(after))
+			suite.Empty(req.RemoteAddr)
+			return
+		case <-timer.C:
+			suite.Fail("request event was not emitted")
+			return
+		}
 	}
 }
 
@@ -389,8 +407,8 @@ func (suite *ServerTestSuite) TestItems() {
 		})).
 		End()
 	err := suite.DataClient.BatchInsertFeedback(suite.T().Context(), []data.Feedback{{
-		FeedbackKey: data.FeedbackKey{FeedbackType: "read", UserId: "0", ItemId: "6"},
-		Timestamp:   time.Now().Truncate(time.Hour),
+		FeedbackType: "read", UserId: "0", ItemId: "6",
+		Timestamp: time.Now().Truncate(time.Hour),
 	}}, true, true, true)
 	suite.NoError(err)
 	apitest.New().
@@ -765,7 +783,7 @@ func (suite *ServerTestSuite) TestQuota() {
 		Handler(suite.handler).
 		Post("/api/feedback").
 		Header("X-API-Key", apiKey).
-		JSON([]Feedback{{FeedbackKey: data.FeedbackKey{FeedbackType: "click", UserId: "u", ItemId: "i"}, Labels: []string{"abcdef"}}}).
+		JSON([]Feedback{{FeedbackType: "click", UserId: "u", ItemId: "i", Labels: []string{"abcdef"}}}).
 		Expect(t).
 		Status(http.StatusTooManyRequests).
 		End()
@@ -776,7 +794,7 @@ func (suite *ServerTestSuite) TestQuota() {
 		Handler(suite.handler).
 		Post("/api/feedback").
 		Header("X-API-Key", apiKey).
-		JSON([]Feedback{{FeedbackKey: data.FeedbackKey{FeedbackType: "click", UserId: "u", ItemId: "i"}, Comment: "toolong"}}).
+		JSON([]Feedback{{FeedbackType: "click", UserId: "u", ItemId: "i", Comment: "toolong"}}).
 		Expect(t).
 		Status(http.StatusTooManyRequests).
 		End()
@@ -839,16 +857,77 @@ func (suite *ServerTestSuite) TestSearchItems() {
 		End()
 }
 
+func (suite *ServerTestSuite) TestSearchEmbedding() {
+	t := suite.T()
+	const query = "semantic query 推荐系统"
+	embedding := mock.Hash(query)
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		suite.Equal(http.MethodPost, r.Method)
+		suite.Equal("/v1/embeddings", r.URL.Path)
+		suite.Equal("Bearer embedding-token", r.Header.Get("Authorization"))
+		var request struct {
+			Input      string `json:"input"`
+			Model      string `json:"model"`
+			Dimensions int    `json:"dimensions"`
+		}
+		suite.NoError(json.NewDecoder(r.Body).Decode(&request))
+		suite.Equal(query, request.Input)
+		suite.Equal("test-embedding-model", request.Model)
+		suite.Equal(len(embedding), request.Dimensions)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{"embedding": embedding}},
+		})
+	}))
+	defer endpoint.Close()
+	suite.Config.OpenAI.BaseURL = endpoint.URL + "/v1"
+	suite.Config.OpenAI.AuthToken = "embedding-token"
+	suite.Config.OpenAI.EmbeddingModel = "test-embedding-model"
+	suite.Config.OpenAI.EmbeddingDimensions = len(embedding)
+	suite.Config.Recommend.ItemToItem = []config.ItemToItemConfig{{Name: "semantic", Type: "embedding"}}
+	suite.Empty(suite.Config.Recommend.Search.Columns)
+
+	items := []data.Item{
+		{ItemId: "a-far", Categories: []string{"far"}, Comment: "First alphabetically", Labels: map[string]any{"rank": "far"}},
+		{ItemId: "z-near", Categories: []string{"near"}, Comment: "Most similar", Labels: map[string]any{"rank": "near"}},
+		{ItemId: "hidden", IsHidden: true},
+	}
+	suite.Require().NoError(suite.DataClient.BatchInsertItems(t.Context(), items))
+	far := append([]float32(nil), embedding...)
+	near := append([]float32(nil), embedding...)
+	far[0] += 100
+	near[0] += 10
+	collection := vectors.ItemToItemCollection("semantic")
+	suite.Require().NoError(suite.VectorClient.AddCollection(t.Context(), collection, len(embedding), vectors.Euclidean, vectors.VectorConfig{}))
+	suite.Require().NoError(suite.VectorClient.AddVectors(t.Context(), collection, []vectors.Vector{
+		{Id: items[0].ItemId, Values: far},
+		{Id: items[1].ItemId, Values: near},
+		{Id: items[2].ItemId, Values: embedding, IsHidden: true},
+	}))
+	apitest.New().
+		Handler(suite.handler).
+		Get("/api/items").
+		Header("X-API-Key", apiKey).
+		QueryParams(map[string]string{
+			"q":     query,
+			"index": "semantic",
+			"n":     "2",
+		}).
+		Expect(t).
+		Status(http.StatusOK).
+		Body(suite.marshal(ItemIterator{Items: []data.Item{items[1], items[0]}})).End()
+}
+
 func (suite *ServerTestSuite) TestFeedback() {
 	ctx := suite.T().Context()
 	t := suite.T()
 	// Insert ret
 	feedback := []data.Feedback{
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "click", UserId: "0", ItemId: "0"}, Value: 1.0},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "click", UserId: "1", ItemId: "2"}, Value: 1.0, Labels: []any{"positive", "mobile"}},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "click", UserId: "2", ItemId: "4"}, Value: 1.0, Labels: map[string]any{"source": "rest", "rank": json.Number("2")}},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "click", UserId: "3", ItemId: "6"}, Value: 1.0},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "click", UserId: "4", ItemId: "8"}, Value: 1.0},
+		{FeedbackType: "click", UserId: "0", ItemId: "0", Value: 1.0},
+		{FeedbackType: "click", UserId: "1", ItemId: "2", Value: 1.0, Labels: []any{"positive", "mobile"}},
+		{FeedbackType: "click", UserId: "2", ItemId: "4", Value: 1.0, Labels: map[string]any{"source": "rest", "rank": json.Number("2")}},
+		{FeedbackType: "click", UserId: "3", ItemId: "6", Value: 1.0},
+		{FeedbackType: "click", UserId: "4", ItemId: "8", Value: 1.0},
 	}
 	//BatchInsertFeedback
 	apitest.New().
@@ -950,8 +1029,8 @@ func (suite *ServerTestSuite) TestFeedback() {
 		Put("/api/feedback").
 		Header("X-API-Key", apiKey).
 		JSON([]data.Feedback{{
-			FeedbackKey: data.FeedbackKey{FeedbackType: "click", UserId: "0", ItemId: "0"},
-			Comment:     "override",
+			FeedbackType: "click", UserId: "0", ItemId: "0",
+			Comment: "override",
 		}}).
 		Expect(t).
 		Status(http.StatusOK).
@@ -967,8 +1046,8 @@ func (suite *ServerTestSuite) TestFeedback() {
 		Post("/api/feedback").
 		Header("X-API-Key", apiKey).
 		JSON([]data.Feedback{{
-			FeedbackKey: data.FeedbackKey{FeedbackType: "click", UserId: "0", ItemId: "0"},
-			Comment:     "not_override",
+			FeedbackType: "click", UserId: "0", ItemId: "0",
+			Comment: "not_override",
 		}}).
 		Expect(t).
 		Status(http.StatusOK).
@@ -984,7 +1063,7 @@ func (suite *ServerTestSuite) TestFeedback() {
 		Handler(suite.handler).
 		Post("/api/feedback").
 		Header("X-API-Key", apiKey).
-		JSON([]Feedback{{FeedbackKey: data.FeedbackKey{UserId: "100", ItemId: "100", FeedbackType: "Type"}}}).
+		JSON([]Feedback{{UserId: "100", ItemId: "100", FeedbackType: "Type"}}).
 		Expect(t).
 		Status(http.StatusOK).
 		Body(`{"RowAffected": 1}`).
@@ -1010,11 +1089,11 @@ func (suite *ServerTestSuite) TestItemToItem() {
 	}))
 
 	expected := suite.marshal([]cache.Score{
-		{Id: "near", Score: 0.9900990092071315, Categories: []string{"movie", "drama"}},
+		{Id: "near", Score: 0.990103795941627, Categories: []string{"movie", "drama"}},
 		{Id: "far", Score: 0.009900990099009901, Categories: []string{"movie"}},
 	})
 	expectedAllCategories := suite.marshal([]cache.Score{
-		{Id: "near", Score: 0.9900990092071315, Categories: []string{"movie", "drama"}},
+		{Id: "near", Score: 0.990103795941627, Categories: []string{"movie", "drama"}},
 	})
 	apitest.New().Handler(suite.handler).Get("/api/item/"+"source"+"/neighbors").
 		Query("category", "movie").Header("X-API-Key", apiKey).
@@ -1075,12 +1154,10 @@ func (suite *ServerTestSuite) TestNonPersonalizedRecommend() {
 				End()
 			// insert read feedback
 			err = suite.DataClient.BatchInsertFeedback(ctx, []data.Feedback{{
-				FeedbackKey: data.FeedbackKey{
-					FeedbackType: "read",
-					UserId:       "0",
-					ItemId:       strconv.Itoa(i) + "1",
-				},
-				Timestamp: time.Now().Add(-time.Hour),
+				FeedbackType: "read",
+				UserId:       "0",
+				ItemId:       strconv.Itoa(i) + "1",
+				Timestamp:    time.Now().Add(-time.Hour),
 			}}, true, true, true)
 			assert.NoError(t, err)
 
@@ -1211,11 +1288,11 @@ func (suite *ServerTestSuite) TestDeleteFeedback() {
 		End()
 	// Insert feedback
 	feedback := []data.Feedback{
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "type1", UserId: "2", ItemId: "3"}},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "type2", UserId: "2", ItemId: "3"}},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "type3", UserId: "2", ItemId: "3"}},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "type1", UserId: "1", ItemId: "6"}},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "type1", UserId: "4", ItemId: "8"}},
+		{FeedbackType: "type1", UserId: "2", ItemId: "3"},
+		{FeedbackType: "type2", UserId: "2", ItemId: "3"},
+		{FeedbackType: "type3", UserId: "2", ItemId: "3"},
+		{FeedbackType: "type1", UserId: "1", ItemId: "6"},
+		{FeedbackType: "type1", UserId: "4", ItemId: "8"},
 	}
 	apitest.New().
 		Handler(suite.handler).
@@ -1304,9 +1381,9 @@ func (suite *ServerTestSuite) TestGetRecommends() {
 	suite.NoError(err)
 	// insert feedback
 	feedback := []data.Feedback{
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "2"}},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "4"}},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "1"}, Timestamp: time.Now().Add(time.Hour)},
+		{FeedbackType: "a", UserId: "0", ItemId: "2"},
+		{FeedbackType: "a", UserId: "0", ItemId: "4"},
+		{FeedbackType: "a", UserId: "0", ItemId: "1", Timestamp: time.Now().Add(time.Hour)},
 	}
 	apitest.New().
 		Handler(suite.handler).
@@ -1458,9 +1535,9 @@ func (suite *ServerTestSuite) TestGetRecommendsReplacement() {
 		End()
 	// insert feedback
 	feedback := []data.Feedback{
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "2"}},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "4"}},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "1"}, Timestamp: time.Now().Add(time.Hour)},
+		{FeedbackType: "a", UserId: "0", ItemId: "2"},
+		{FeedbackType: "a", UserId: "0", ItemId: "4"},
+		{FeedbackType: "a", UserId: "0", ItemId: "1", Timestamp: time.Now().Add(time.Hour)},
 	}
 	apitest.New().
 		Handler(suite.handler).
@@ -1499,11 +1576,11 @@ func (suite *ServerTestSuite) TestGetRecommendsFallbackItemToItem() {
 	suite.NoError(err)
 	// insert feedback
 	feedback := []data.Feedback{
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "1"}, Timestamp: time.Date(2010, 1, 1, 1, 1, 1, 1, time.UTC)},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "2"}, Timestamp: time.Date(2009, 1, 1, 1, 1, 1, 1, time.UTC)},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "3"}, Timestamp: time.Date(2008, 1, 1, 1, 1, 1, 1, time.UTC)},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "4"}, Timestamp: time.Date(2007, 1, 1, 1, 1, 1, 1, time.UTC)},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "5"}, Timestamp: time.Date(2006, 1, 1, 1, 1, 1, 1, time.UTC)},
+		{FeedbackType: "a", UserId: "0", ItemId: "1", Timestamp: time.Date(2010, 1, 1, 1, 1, 1, 1, time.UTC)},
+		{FeedbackType: "a", UserId: "0", ItemId: "2", Timestamp: time.Date(2009, 1, 1, 1, 1, 1, 1, time.UTC)},
+		{FeedbackType: "a", UserId: "0", ItemId: "3", Timestamp: time.Date(2008, 1, 1, 1, 1, 1, 1, time.UTC)},
+		{FeedbackType: "a", UserId: "0", ItemId: "4", Timestamp: time.Date(2007, 1, 1, 1, 1, 1, 1, time.UTC)},
+		{FeedbackType: "a", UserId: "0", ItemId: "5", Timestamp: time.Date(2006, 1, 1, 1, 1, 1, 1, time.UTC)},
 	}
 	apitest.New().
 		Handler(suite.handler).
@@ -1569,10 +1646,10 @@ func (suite *ServerTestSuite) TestGetRecommendsFallbackUserToUser() {
 	suite.NoError(err)
 	// insert feedback
 	feedback := []data.Feedback{
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "1"}},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "2"}},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "3"}},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "4"}},
+		{FeedbackType: "a", UserId: "0", ItemId: "1"},
+		{FeedbackType: "a", UserId: "0", ItemId: "2"},
+		{FeedbackType: "a", UserId: "0", ItemId: "3"},
+		{FeedbackType: "a", UserId: "0", ItemId: "4"},
 	}
 	apitest.New().
 		Handler(suite.handler).
@@ -1595,17 +1672,17 @@ func (suite *ServerTestSuite) TestGetRecommendsFallbackUserToUser() {
 	})
 	suite.NoError(err)
 	err = suite.DataClient.BatchInsertFeedback(ctx, []data.Feedback{
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "1", ItemId: "11"}},
+		{FeedbackType: "a", UserId: "1", ItemId: "11"},
 	}, true, true, true)
 	suite.NoError(err)
 	err = suite.DataClient.BatchInsertFeedback(ctx, []data.Feedback{
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "2", ItemId: "12"}},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "2", ItemId: "48"}},
+		{FeedbackType: "a", UserId: "2", ItemId: "12"},
+		{FeedbackType: "a", UserId: "2", ItemId: "48"},
 	}, true, true, true)
 	suite.NoError(err)
 	err = suite.DataClient.BatchInsertFeedback(ctx, []data.Feedback{
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "3", ItemId: "13"}},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "3", ItemId: "48"}},
+		{FeedbackType: "a", UserId: "3", ItemId: "13"},
+		{FeedbackType: "a", UserId: "3", ItemId: "48"},
 	}, true, true, true)
 	suite.NoError(err)
 	// insert categorized items
@@ -1845,11 +1922,11 @@ func (suite *ServerTestSuite) TestSessionRecommend() {
 
 	// test fallback
 	feedback := []data.Feedback{
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "1"}, Timestamp: time.Date(2010, 1, 1, 1, 1, 1, 1, time.UTC)},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "2"}, Timestamp: time.Date(2009, 1, 1, 1, 1, 1, 1, time.UTC)},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "3"}, Timestamp: time.Date(2008, 1, 1, 1, 1, 1, 1, time.UTC)},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "4"}, Timestamp: time.Date(2007, 1, 1, 1, 1, 1, 1, time.UTC)},
-		{FeedbackKey: data.FeedbackKey{FeedbackType: "a", UserId: "0", ItemId: "5"}, Timestamp: time.Date(2006, 1, 1, 1, 1, 1, 1, time.UTC)},
+		{FeedbackType: "a", UserId: "0", ItemId: "1", Timestamp: time.Date(2010, 1, 1, 1, 1, 1, 1, time.UTC)},
+		{FeedbackType: "a", UserId: "0", ItemId: "2", Timestamp: time.Date(2009, 1, 1, 1, 1, 1, 1, time.UTC)},
+		{FeedbackType: "a", UserId: "0", ItemId: "3", Timestamp: time.Date(2008, 1, 1, 1, 1, 1, 1, time.UTC)},
+		{FeedbackType: "a", UserId: "0", ItemId: "4", Timestamp: time.Date(2007, 1, 1, 1, 1, 1, 1, time.UTC)},
+		{FeedbackType: "a", UserId: "0", ItemId: "5", Timestamp: time.Date(2006, 1, 1, 1, 1, 1, 1, time.UTC)},
 	}
 	apitest.New().
 		Handler(suite.handler).

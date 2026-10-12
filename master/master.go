@@ -140,20 +140,18 @@ func NewMaster(cfg *config.Config, cacheFolder string, standalone bool, configPa
 	duration := min(cfg.Recommend.Collaborative.FitPeriod, cfg.Recommend.Ranker.FitPeriod)
 	m := &Master{
 		// create task monitor
-		cachePath:    cacheFolder,
-		configPath:   configPath,
-		standalone:   standalone,
-		tracer:       monitor.NewTracer("master"),
-		openAIClient: openai.NewClientWithConfig(clientConfig),
-		RestServer: server.RestServer{
-			Config:       cfg,
-			CacheClient:  cache.NoDatabase{},
-			DataClient:   data.NoDatabase{},
-			VectorClient: vectors.NoDatabase{},
-			HttpHost:     cfg.Master.HttpHost,
-			HttpPort:     cfg.Master.HttpPort,
-			WebService:   new(restful.WebService),
-		},
+		cachePath:         cacheFolder,
+		configPath:        configPath,
+		standalone:        standalone,
+		tracer:            monitor.NewTracer("master"),
+		openAIClient:      openai.NewClientWithConfig(clientConfig),
+		Config:            cfg,
+		CacheClient:       cache.NoDatabase{},
+		DataClient:        data.NoDatabase{},
+		VectorClient:      vectors.NoDatabase{},
+		HttpHost:          cfg.Master.HttpHost,
+		HttpPort:          cfg.Master.HttpPort,
+		WebService:        new(restful.WebService),
 		ticker:            time.NewTicker(duration),
 		scheduled:         make(chan struct{}, 1),
 		cancel:            func() {},
@@ -318,7 +316,8 @@ func (m *Master) Serve() {
 
 	// open vector store
 	log.Logger().Info("opening vector store", zap.String("path", m.Config.Database.VectorStore))
-	m.VectorClient, err = vectors.Open(m.Config.Database.VectorStore, m.Config.Database.VectorTablePrefix)
+	m.VectorClient, err = vectors.Open(m.Config.Database.VectorStore, m.Config.Database.VectorTablePrefix,
+		storage.WithNumJobs(m.Config.Master.NumJobs), storage.WithSkipUnindexedSegments(true))
 	if err != nil {
 		log.Logger().Fatal("failed to connect vector store", zap.Error(err))
 	}
