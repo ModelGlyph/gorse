@@ -376,6 +376,8 @@ func TestRedisGetScoresRespectsDeadlineAfterRequest(t *testing.T) {
 	})
 	defer client.Close()
 	database := &Redis{TablePrefix: "gorse_", client: client}
+	timeout := time.NewTimer(time.Second)
+	defer timeout.Stop()
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
 	result := make(chan error, 1)
@@ -388,7 +390,7 @@ func TestRedisGetScoresRespectsDeadlineAfterRequest(t *testing.T) {
 	case <-requestReceived:
 	case err := <-serverResult:
 		t.Fatalf("fake redis failed before receiving HMGET: %v", err)
-	case <-time.After(time.Second):
+	case <-timeout.C:
 		t.Fatal("HMGET was not sent")
 	}
 	select {
@@ -396,8 +398,13 @@ func TestRedisGetScoresRespectsDeadlineAfterRequest(t *testing.T) {
 		var timeoutError net.Error
 		assert.ErrorAs(t, err, &timeoutError)
 		assert.True(t, timeoutError.Timeout())
+		select {
+		case <-ctx.Done():
+		case <-timeout.C:
+			t.Fatal("context deadline was not propagated")
+		}
 		assert.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
-	case <-time.After(time.Second):
+	case <-timeout.C:
 		t.Fatal("GetScores ignored the context deadline after sending HMGET")
 	}
 }

@@ -399,7 +399,7 @@ func (r *Redis) UpdateScores(ctx context.Context, collections []string, subset *
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "@collection:{ %s }", escape(strings.Join(collections, " | ")))
 	fmt.Fprintf(&builder, " @id:{ %s }", escape(id))
-	if subset != nil {
+	if subset != nil && *subset != "" {
 		fmt.Fprintf(&builder, " @subset:{ %s }", escape(*subset))
 	}
 	limit := r.maxSearchResults
@@ -413,8 +413,18 @@ func (r *Redis) UpdateScores(ctx context.Context, collections []string, subset *
 	// This avoids pagination drift when patch.Score changes the sort order.
 	keys := make([]string, 0)
 	keySet := make(map[string]struct{})
+	// 空子集按文档键精确定位，nil 子集仍检索所有子集。
+	if subset != nil && *subset == "" {
+		for _, collection := range collections {
+			key := r.documentKey(collection, "", id)
+			if _, exists := keySet[key]; !exists {
+				keySet[key] = struct{}{}
+				keys = append(keys, key)
+			}
+		}
+	}
 	offset := 0
-	for {
+	for subset == nil || *subset != "" {
 		// search documents
 		result, err := r.client.FTSearchWithArgs(ctx, r.DocumentTable(), builder.String(), &redis.FTSearchOptions{
 			SortBy:      []redis.FTSearchSortBy{{FieldName: "score", Desc: true}},

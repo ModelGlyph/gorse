@@ -917,8 +917,12 @@ func (s *MasterTestSuite) TestGarbageCollection() {
 	})
 	s.NoError(err)
 
+	// 在缓存夹具写入前加载用于垃圾回收的数据集。
+	datasets, err := s.loadDataset(ctx)
+	s.NoError(err)
+
 	// insert non-personalized cache
-	timestamp := time.Now().Add(time.Hour)
+	timestamp := time.Now().UTC().Add(time.Hour)
 	err = s.CacheClient.AddScores(ctx, cache.NonPersonalized, "custom", []cache.Score{
 		{Id: "1", Score: 1, Categories: []string{""}, Timestamp: timestamp},
 		{Id: "2", Score: 2, Categories: []string{""}, Timestamp: timestamp},
@@ -957,9 +961,7 @@ func (s *MasterTestSuite) TestGarbageCollection() {
 	})
 	s.NoError(err)
 
-	// load dataset and run garbage collection
-	datasets, err := s.loadDataset(ctx)
-	s.NoError(err)
+	// run garbage collection
 	err = s.collectGarbage(ctx, datasets.rankingDataset)
 	s.NoError(err)
 
