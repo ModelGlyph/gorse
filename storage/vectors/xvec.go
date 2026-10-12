@@ -26,7 +26,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
+	"github.com/gorse-io/gorse/common/floats"
 	"github.com/gorse-io/gorse/storage"
 	"github.com/gorse-io/xvec"
 	"github.com/pkg/errors"
@@ -40,21 +42,32 @@ const (
 )
 
 func init() {
-	Register([]string{storage.XvecPrefix}, func(path, tablePrefix string, _ ...storage.Option) (Database, error) {
+	Register([]string{storage.XvecPrefix}, func(path, tablePrefix string, opts ...storage.Option) (Database, error) {
 		root := strings.TrimPrefix(path, storage.XvecPrefix)
 		if root == "" {
 			return nil, errors.New("xvec path is empty")
 		}
-		return &Xvec{root: root, tablePrefix: tablePrefix}, nil
+		opt := storage.NewOptions(opts...)
+		return &Xvec{
+			root:        root,
+			tablePrefix: tablePrefix,
+			numJobs:     opt.NumJobs,
+			collectionOptions: xvec.CollectionOptions{
+				EnableMmap:            true,
+				SkipUnindexedSegments: opt.SkipUnindexedSegments,
+			},
+		}, nil
 	})
 }
 
 // Xvec stores each Gorse vector collection in a xvec collection directory.
 type Xvec struct {
-	root        string
-	tablePrefix string
-	collections sync.Map // map[string]*xvec.Collection
-	closed      atomic.Bool
+	root              string
+	tablePrefix       string
+	collections       sync.Map // map[string]*xvec.Collection
+	closed            atomic.Bool
+	numJobs           int
+	collectionOptions xvec.CollectionOptions
 }
 
 func (db *Xvec) Init() error {
@@ -76,6 +89,14 @@ func (db *Xvec) Init() error {
 	})
 	if hasCollections {
 		return nil
+	}
+	if db.numJobs > 0 {
+		cfg := xvec.NewRuntimeConfig()
+		cfg.QueryConcurrency = db.numJobs
+		cfg.OptimizeConcurrency = db.numJobs
+		if err := xvec.ConfigureRuntime(cfg); err != nil {
+			return errors.WithStack(err)
+		}
 	}
 	type openedCollection struct {
 		name       string
@@ -104,7 +125,7 @@ func (db *Xvec) Init() error {
 		if name == "" {
 			continue
 		}
-		collection, err := xvec.Open(context.Background(), filepath.Join(db.root, entry.Name()), xvec.CollectionOptions{})
+		collection, err := xvec.Open(context.Background(), filepath.Join(db.root, entry.Name()), db.collectionOptions)
 		if err != nil {
 			cleanup()
 			return errors.WithStack(err)
@@ -177,7 +198,7 @@ func (db *Xvec) DescribeCollection(ctx context.Context, name string) (*Collectio
 	}
 	var metric xvec.MetricType
 	switch params := field.EffectiveIndex().(type) {
-	case xvec.DiskANNIndexParams:
+	case xvec.HNSWIndexParams:
 		metric = params.Metric
 	case xvec.FlatIndexParams:
 		metric = params.Metric
@@ -190,7 +211,7 @@ func (db *Xvec) DescribeCollection(ctx context.Context, name string) (*Collectio
 	}
 	return &CollectionInfo{
 		Name: name, Dimension: int(field.Dimension), Distance: distance,
-		VectorConfig: VectorConfig{Type: QuantizationNone},
+		Type: QuantizationNone,
 	}, nil
 }
 
@@ -207,7 +228,7 @@ func (db *Xvec) AddCollection(ctx context.Context, name string, dimensions int, 
 	if _, found := db.collections.Load(name); found {
 		return fmt.Errorf("collection %s %w", name, storage.ErrAlreadyExists)
 	}
-	collection, err := xvec.CreateAndOpen(ctx, filepath.Join(db.root, physicalName), schema, xvec.CollectionOptions{})
+	collection, err := xvec.CreateAndOpen(ctx, filepath.Join(db.root, physicalName), schema, db.collectionOptions)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -245,7 +266,8 @@ func (db *Xvec) collectionSchema(ctx context.Context, name string, dimensions in
 		}
 		vectorField = xvec.FieldSchema{Name: xvecVectorField, DataType: xvec.DataTypeSparseVectorFP32, Index: xvec.NewFlatIndexParams(metric)}
 	} else {
-		vectorField = xvec.FieldSchema{Name: xvecVectorField, DataType: xvec.DataTypeVectorFP32, Dimension: uint32(dimensions), Index: xvec.NewDiskANNIndexParams(metric)}
+		index := xvec.NewHNSWIndexParams(metric)
+		vectorField = xvec.FieldSchema{Name: xvecVectorField, DataType: xvec.DataTypeVectorFP16, Dimension: uint32(dimensions), Index: index}
 	}
 	physicalName := db.tablePrefix + name
 	schema := xvec.NewCollectionSchema(physicalName,
@@ -304,8 +326,8 @@ func (db *Xvec) AddVectors(ctx context.Context, name string, vectors []Vector) e
 	schema := collection.Schema()
 	documents := make([]xvec.Document, len(vectors))
 	for i, vector := range vectors {
-		var value any = xvec.VectorFP32(vector.Values)
-		if len(vector.Indices) > 0 {
+		var value any = xvecVectorFP16(vector)
+		if vector.IsSparse() {
 			value = xvec.SparseVectorFP32{Indices: vector.Indices, Values: vector.Values}
 		}
 		document := xvec.Document{PrimaryKey: vector.Id, Fields: map[string]any{
@@ -355,8 +377,8 @@ func (db *Xvec) GetVectors(ctx context.Context, name string, ids []string) ([]Ve
 		}
 		if value, found := document.Field(xvecVectorField); found {
 			switch value := value.(type) {
-			case xvec.VectorFP32:
-				vector.Values = []float32(value)
+			case xvec.VectorFP16:
+				vector.Values = float32Vector(value)
 			case xvec.SparseVectorFP32:
 				vector.Indices = value.Indices
 				vector.Values = value.Values
@@ -401,12 +423,12 @@ func (db *Xvec) QueryVectors(ctx context.Context, name string, q Vector, categor
 			IncludeVectors: true,
 		},
 	}
-	if len(q.Indices) > 0 {
+	if q.IsSparse() {
 		query.SparseVector = xvec.SparseVectorFP32{Indices: q.Indices, Values: q.Values}
 		query.Params = xvec.NewFlatQueryParams()
 	} else {
-		query.DenseVector = xvec.VectorFP32(q.Values)
-		query.Params = xvec.NewDiskANNQueryParams()
+		query.DenseVector = xvecVectorFP16(q)
+		query.Params = xvec.NewHNSWQueryParams()
 	}
 	documents, err := collection.Query(ctx, query)
 	if err != nil {
@@ -418,10 +440,10 @@ func (db *Xvec) QueryVectors(ctx context.Context, name string, q Vector, categor
 	}
 	results := make([]ScoredVector, 0, len(documents))
 	for _, document := range documents {
-		if len(q.Indices) > 0 && document.Score == 0 {
+		if q.IsSparse() && document.Score == 0 {
 			continue
 		}
-		result := ScoredVector{Vector: Vector{Id: document.PrimaryKey}, Score: document.Score}
+		result := ScoredVector{Id: document.PrimaryKey, Score: document.Score}
 		if info.Distance != Dot {
 			result.Score = -result.Score
 		}
@@ -436,8 +458,8 @@ func (db *Xvec) QueryVectors(ctx context.Context, name string, q Vector, categor
 		}
 		if value, found := document.Field(xvecVectorField); found {
 			switch vector := value.(type) {
-			case xvec.VectorFP32:
-				result.Vector.Values = []float32(vector)
+			case xvec.VectorFP16:
+				result.Vector.Values = float32Vector(vector)
 			case xvec.SparseVectorFP32:
 				result.Vector.Indices = vector.Indices
 				result.Vector.Values = vector.Values
@@ -483,4 +505,14 @@ func xvecDistance(metric xvec.MetricType) (Distance, error) {
 	default:
 		return Cosine, fmt.Errorf("xvec metric %s %w", metric, storage.ErrNotSupported)
 	}
+}
+
+func xvecVectorFP16(vector Vector) xvec.VectorFP16 {
+	bits := vector.Float16Values()
+	return unsafe.Slice((*xvec.Float16)(unsafe.Pointer(unsafe.SliceData(bits))), len(bits))
+}
+
+func float32Vector(values xvec.VectorFP16) []float32 {
+	bits := unsafe.Slice((*uint16)(unsafe.Pointer(unsafe.SliceData(values))), len(values))
+	return floats.ToFloat32(bits)
 }

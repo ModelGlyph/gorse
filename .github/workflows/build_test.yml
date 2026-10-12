@@ -10,6 +10,9 @@ on:
       - master
       - 'release-**'
 
+permissions:
+  contents: read
+
 jobs:
   unit_test:
     strategy:
@@ -52,19 +55,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
-      clickhouse:
-        image: clickhouse/clickhouse-server:26.2
-        ports:
-          - 8123
-        env:
-          CLICKHOUSE_USER: gorse
-          CLICKHOUSE_PASSWORD: gorse_pass
-        options: >-
-          --health-cmd="clickhouse-client --query 'SELECT 1'" 
-          --health-interval=10s 
-          --health-timeout=5s 
-          --health-retries=5
 
       redis:
         image: redis:8
@@ -132,8 +122,6 @@ jobs:
         POSTGRES_URI: postgres://gorse:gorse_pass@localhost:${{ job.services.postgres.ports[5432] }}/
         # MongoDB
         MONGO_URI: mongodb://root:password@localhost:${{ job.services.mongo.ports[27017] }}/
-        # ClickHouse
-        CLICKHOUSE_URI: clickhouse://gorse:gorse_pass@localhost:${{ job.services.clickhouse.ports[8123] }}/
         # Redis
         REDIS_URI: redis://localhost:${{ job.services.redis.ports[6379] }}/
         # S3
@@ -146,6 +134,12 @@ jobs:
         QDRANT_URI: qdrant://localhost:${{ job.services.qdrant.ports[6334] }}/
         # Weaviate
         WEAVIATE_URI: weaviate://localhost:${{ job.services.weaviate.ports[8080] }}/
+
+    - name: Test XLA
+      if: runner.arch == 'X64' || runner.arch == 'ARM64'
+      run: go test -tags xla -timeout 20m ./model/ctr
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest'
@@ -185,6 +179,12 @@ jobs:
 
     - name: Test
       run: go test -timeout 20m ./...
+
+    - name: Test XLA
+      if: runner.arch == 'ARM64'
+      run: go test -tags xla -timeout 20m ./model/ctr
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   unit_test_windows:
     strategy:
@@ -244,12 +244,18 @@ jobs:
     - name: Test
       run: go test -timeout 20m ./...
 
+    - name: Test XLA
+      if: runner.arch == 'X64'
+      run: go test -tags xla -timeout 20m ./model/ctr
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   integrate_test:
     name: integrate tests
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        database: [mysql, postgres, mongo, sqlite]
+        database: [mysql+qdrant, postgres+weaviate, mongo+milvus, sqlite+xvec]
     steps:
     - uses: actions/checkout@v5
       with:

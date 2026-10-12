@@ -40,7 +40,6 @@ var (
 	positiveFeedbackType2 = "positiveFeedbackType2"
 	negativeFeedbackType  = "negativeFeedbackType"
 	duplicateFeedbackType = "duplicateFeedbackType"
-	dateTime64Zero        = time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)
 )
 
 type baseTestSuite struct {
@@ -132,14 +131,6 @@ func (suite *baseTestSuite) getFeedbackStream(ctx context.Context, batchSize int
 	return feedbacks
 }
 
-func (suite *baseTestSuite) isClickHouse() bool {
-	if sqlDB, isSQL := suite.Database.(*SQLDatabase); !isSQL {
-		return false
-	} else {
-		return sqlDB.driver == ClickHouse
-	}
-}
-
 func (suite *baseTestSuite) analyzeTables() {
 	sqlDatabase, ok := suite.Database.(*SQLDatabase)
 	if ok && sqlDatabase.driver == Postgres {
@@ -203,11 +194,17 @@ func (suite *baseTestSuite) TestUsers() {
 	// Get users
 	users := suite.getUsers(ctx, 3)
 	suite.Equal(10, len(users))
-	for i, user := range users {
-		suite.Equal(insertedUsers[9-i], user)
+	for i := range users {
+		suite.False(users[i].UpdateAt.IsZero())
+		users[i].UpdateAt = time.Time{}
+		suite.Equal(insertedUsers[9-i], users[i])
 	}
 	// Get user stream
 	usersFromStream := suite.getUsersStream(ctx, 3)
+	for i := range usersFromStream {
+		suite.False(usersFromStream[i].UpdateAt.IsZero())
+		usersFromStream[i].UpdateAt = time.Time{}
+	}
 	suite.ElementsMatch(insertedUsers, usersFromStream)
 	// Get this user
 	user, err := suite.Database.GetUser(ctx, "0")
@@ -219,14 +216,22 @@ func (suite *baseTestSuite) TestUsers() {
 	_, err = suite.Database.GetUser(ctx, "0")
 	suite.ErrorIs(err, storage.ErrNotFound)
 	// test override
+	user, err = suite.Database.GetUser(ctx, "1")
+	suite.NoError(err)
+	previousUpdateAt := user.UpdateAt
+	// MongoDB stores timestamps with millisecond precision.
+	time.Sleep(time.Millisecond)
 	err = suite.Database.BatchInsertUsers(ctx, []User{{UserId: "1", Comment: "override"}})
 	suite.NoError(err)
 	err = suite.Database.Optimize()
 	suite.NoError(err)
 	user, err = suite.Database.GetUser(ctx, "1")
 	suite.NoError(err)
+	suite.Greater(user.UpdateAt, previousUpdateAt, "UpdateAt should increase after overwriting a user")
 	suite.Equal("override", user.Comment)
 	// test modify
+	previousUpdateAt = user.UpdateAt
+	time.Sleep(time.Millisecond)
 	err = suite.Database.ModifyUser(ctx, "1", UserPatch{Comment: new("modify")})
 	suite.NoError(err)
 	err = suite.Database.ModifyUser(ctx, "1", UserPatch{Labels: []string{"a", "b", "c"}})
@@ -235,6 +240,7 @@ func (suite *baseTestSuite) TestUsers() {
 	suite.NoError(err)
 	user, err = suite.Database.GetUser(ctx, "1")
 	suite.NoError(err)
+	suite.Greater(user.UpdateAt, previousUpdateAt, "UpdateAt should increase after modifying a user")
 	suite.Equal("modify", user.Comment)
 	suite.Equal([]any{"a", "b", "c"}, user.Labels)
 
@@ -250,7 +256,7 @@ func (suite *baseTestSuite) TestUsers() {
 func (suite *baseTestSuite) TestFeedback() {
 	ctx := suite.T().Context()
 	// users that already exists
-	err := suite.Database.BatchInsertUsers(ctx, []User{{"0", []string{"a"}, "comment"}})
+	err := suite.Database.BatchInsertUsers(ctx, []User{{UserId: "0", Labels: []string{"a"}, Comment: "comment"}})
 	suite.NoError(err)
 	// items that already exists
 	err = suite.Database.BatchInsertItems(ctx, []Item{{ItemId: "0", Labels: []string{"b"}, Timestamp: time.Date(1996, 4, 8, 10, 0, 0, 0, time.UTC)}})
@@ -334,12 +340,7 @@ func (suite *baseTestSuite) TestFeedback() {
 	for i, item := range items {
 		suite.Equal(strconv.Itoa(i*2), item.ItemId)
 		if item.ItemId != "0" {
-			if suite.isClickHouse() {
-				// ClickHouse returns 1900-01-01 00:00:00 +0000 UTC as zero date.
-				suite.Equal(dateTime64Zero, item.Timestamp)
-			} else {
-				suite.Zero(item.Timestamp)
-			}
+			suite.Zero(item.Timestamp)
 			suite.Empty(item.Labels)
 			suite.Empty(item.Comment)
 		}
@@ -357,10 +358,14 @@ func (suite *baseTestSuite) TestFeedback() {
 	// check users that already exists
 	user, err := suite.Database.GetUser(ctx, "0")
 	suite.NoError(err)
-	suite.Equal(User{"0", []any{"a"}, "comment"}, user)
+	suite.False(user.UpdateAt.IsZero())
+	user.UpdateAt = time.Time{}
+	suite.Equal(User{UserId: "0", Labels: []any{"a"}, Comment: "comment"}, user)
 	// check items that already exists
 	item, err := suite.Database.GetItem(ctx, "0")
 	suite.NoError(err)
+	suite.False(item.UpdateAt.IsZero())
+	item.UpdateAt = time.Time{}
 	suite.Equal(Item{ItemId: "0", Labels: []any{"b"}, Timestamp: time.Date(1996, 4, 8, 10, 0, 0, 0, time.UTC)}, item)
 	// Get typed feedback by user
 	ret, err = suite.Database.GetUserFeedback(ctx, "2", new(time.Now()),
@@ -478,11 +483,7 @@ func (suite *baseTestSuite) TestFeedback() {
 	// check duplicate feedback again
 	ret, err = suite.Database.GetUserItemFeedback(ctx, "0", "0", "a")
 	suite.NoError(err)
-	if suite.isClickHouse() {
-		suite.Equal([]Feedback{{FeedbackKey: FeedbackKey{"a", "0", "0"}, Value: 3, Timestamp: timestamp, Updated: timestamp, Comment: ""}}, ret)
-	} else {
-		suite.Equal([]Feedback{{FeedbackKey: FeedbackKey{"a", "0", "0"}, Value: 1, Timestamp: timestamp, Updated: timestamp, Comment: ""}}, ret)
-	}
+	suite.Equal([]Feedback{{FeedbackKey: FeedbackKey{"a", "0", "0"}, Value: 1, Timestamp: timestamp, Updated: timestamp, Comment: ""}}, ret)
 }
 
 func (suite *baseTestSuite) TestItems() {
@@ -538,31 +539,57 @@ func (suite *baseTestSuite) TestItems() {
 	suite.Equal(5, count)
 	// Get items
 	totalItems := suite.getItems(ctx, 3)
+	for i := range totalItems {
+		suite.False(totalItems[i].UpdateAt.IsZero())
+		totalItems[i].UpdateAt = time.Time{}
+	}
 	suite.Equal(items, totalItems)
 	// Get item stream
 	itemsFromStream := suite.getItemStream(ctx, 3)
+	for i := range itemsFromStream {
+		suite.False(itemsFromStream[i].UpdateAt.IsZero())
+		itemsFromStream[i].UpdateAt = time.Time{}
+	}
 	suite.ElementsMatch(items, itemsFromStream)
 	// Get item
 	for _, item := range items {
 		ret, err := suite.Database.GetItem(ctx, item.ItemId)
 		suite.NoError(err)
+		suite.False(ret.UpdateAt.IsZero())
+		ret.UpdateAt = time.Time{}
 		suite.Equal(item, ret)
 	}
 	// batch get items
 	batchItem, err := suite.Database.BatchGetItems(ctx, []string{"2", "6"}, GetOptions{})
 	suite.NoError(err)
+	for i := range batchItem {
+		suite.False(batchItem[i].UpdateAt.IsZero())
+		batchItem[i].UpdateAt = time.Time{}
+	}
 	suite.Equal([]Item{items[1], items[3]}, batchItem)
 	// Test GetLatestItems
 	latestItems, err := suite.Database.GetLatestItems(ctx, 3, nil, nil)
 	suite.NoError(err)
+	for i := range latestItems {
+		suite.False(latestItems[i].UpdateAt.IsZero())
+		latestItems[i].UpdateAt = time.Time{}
+	}
 	suite.Equal([]Item{items[3], items[1]}, latestItems)
 	latestItemsWithCategory, err := suite.Database.GetLatestItems(ctx, 3, []string{"b"}, nil)
 	suite.NoError(err)
+	for i := range latestItemsWithCategory {
+		suite.False(latestItemsWithCategory[i].UpdateAt.IsZero())
+		latestItemsWithCategory[i].UpdateAt = time.Time{}
+	}
 	suite.Equal([]Item{items[3], items[1]}, latestItemsWithCategory)
 	// Test GetLatestItems with after time filter
 	afterTime := time.Date(1998, 1, 1, 0, 0, 0, 0, time.UTC)
 	latestItemsAfter, err := suite.Database.GetLatestItems(ctx, 3, nil, &afterTime)
 	suite.NoError(err)
+	for i := range latestItemsAfter {
+		suite.False(latestItemsAfter[i].UpdateAt.IsZero())
+		latestItemsAfter[i].UpdateAt = time.Time{}
+	}
 	suite.Equal([]Item{items[3]}, latestItemsAfter) // only the newest item has timestamp > afterTime
 	// Delete item
 	err = suite.Database.DeleteItem(ctx, "0")
@@ -571,18 +598,28 @@ func (suite *baseTestSuite) TestItems() {
 	suite.ErrorIs(err, storage.ErrNotFound)
 
 	// test override
+	item, err := suite.Database.GetItem(ctx, "4")
+	suite.NoError(err)
+	previousUpdateAt := item.UpdateAt
+	// MongoDB stores timestamps with millisecond precision.
+	time.Sleep(time.Millisecond)
 	err = suite.Database.BatchInsertItems(ctx, []Item{{ItemId: "4", IsHidden: false, Categories: []string{"b"}, Labels: []string{"o"}, Comment: "override"}})
 	suite.NoError(err)
 	err = suite.Database.Optimize()
 	suite.NoError(err)
-	item, err := suite.Database.GetItem(ctx, "4")
+	item, err = suite.Database.GetItem(ctx, "4")
 	suite.NoError(err)
+	suite.Greater(item.UpdateAt, previousUpdateAt, "UpdateAt should increase after overwriting an item")
 	suite.False(item.IsHidden)
 	suite.Equal([]string{"b"}, item.Categories)
 	suite.Equal([]any{"o"}, item.Labels)
 	suite.Equal("override", item.Comment)
 
 	// test modify
+	item, err = suite.Database.GetItem(ctx, "2")
+	suite.NoError(err)
+	previousUpdateAt = item.UpdateAt
+	time.Sleep(time.Millisecond)
 	timestamp := time.Date(2000, 1, 1, 1, 1, 1, 0, time.UTC)
 	err = suite.Database.ModifyItem(ctx, "2", ItemPatch{IsHidden: new(true)})
 	suite.NoError(err)
@@ -598,6 +635,7 @@ func (suite *baseTestSuite) TestItems() {
 	suite.NoError(err)
 	item, err = suite.Database.GetItem(ctx, "2")
 	suite.NoError(err)
+	suite.Greater(item.UpdateAt, previousUpdateAt, "UpdateAt should increase after modifying an item")
 	suite.True(item.IsHidden)
 	suite.Equal([]string{"a"}, item.Categories)
 	suite.Equal("modify", item.Comment)
@@ -768,10 +806,7 @@ func (suite *baseTestSuite) TestDeleteFeedback() {
 	// delete user-item feedback
 	deleteCount, err := suite.Database.DeleteUserItemFeedback(ctx, "2", "3")
 	suite.NoError(err)
-	if !suite.isClickHouse() {
-		// RowAffected isn't supported by ClickHouse,
-		suite.Equal(3, deleteCount)
-	}
+	suite.Equal(3, deleteCount)
 	err = suite.Database.Optimize()
 	suite.NoError(err)
 	ret, err = suite.Database.GetUserItemFeedback(ctx, "2", "3")
@@ -780,10 +815,7 @@ func (suite *baseTestSuite) TestDeleteFeedback() {
 	feedbackType1 := "type1"
 	deleteCount, err = suite.Database.DeleteUserItemFeedback(ctx, "1", "3", feedbackType1)
 	suite.NoError(err)
-	if !suite.isClickHouse() {
-		// RowAffected isn't supported by ClickHouse,
-		suite.Equal(1, deleteCount)
-	}
+	suite.Equal(1, deleteCount)
 	ret, err = suite.Database.GetUserItemFeedback(ctx, "1", "3", feedbackType2)
 	suite.NoError(err)
 	suite.Empty(ret)
@@ -829,6 +861,10 @@ func (suite *baseTestSuite) TestTimeLimit() {
 	timeLimit := time.Date(1998, 1, 1, 0, 0, 0, 0, time.UTC)
 	_, ret, err := suite.Database.GetItems(ctx, "", 100, &timeLimit)
 	suite.NoError(err)
+	for i := range ret {
+		suite.False(ret[i].UpdateAt.IsZero())
+		ret[i].UpdateAt = time.Time{}
+	}
 	suite.Equal([]Item{items[2], items[3], items[4]}, ret)
 
 	// insert feedback
@@ -919,13 +955,6 @@ func (suite *baseTestSuite) TestTimezone() {
 			item, err = suite.Database.GetItem(ctx, "200")
 			suite.NoError(err)
 			suite.Equal(now.Round(time.Microsecond).In(time.UTC), item.Timestamp)
-		case ClickHouse:
-			item, err := suite.Database.GetItem(ctx, "100")
-			suite.NoError(err)
-			suite.Equal(now.Truncate(time.Second).In(time.UTC), item.Timestamp)
-			item, err = suite.Database.GetItem(ctx, "200")
-			suite.NoError(err)
-			suite.Equal(now.Truncate(time.Second).In(time.UTC), item.Timestamp)
 		case SQLite:
 			item, err := suite.Database.GetItem(ctx, "100")
 			suite.NoError(err)
@@ -1044,11 +1073,10 @@ func (suite *baseTestSuite) TestPurge() {
 	ctx := suite.T().Context()
 	// insert data
 	err := suite.Database.BatchInsertFeedback(ctx, lo.Map(lo.Range(100), func(t int, i int) Feedback {
-		return Feedback{FeedbackKey: FeedbackKey{
+		return Feedback{
 			FeedbackType: "click",
 			UserId:       strconv.Itoa(t),
-			ItemId:       strconv.Itoa(t),
-		}}
+			ItemId:       strconv.Itoa(t)}
 	}), true, true, true)
 	suite.NoError(err)
 	_, users, err := suite.Database.GetUsers(ctx, "", 100)

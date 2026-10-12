@@ -105,6 +105,43 @@ func (suite *RedisTestSuite) TestEscapeCharacters() {
 	}
 }
 
+// TestScanScoresMultiplePages covers the case TestScanScores cannot: a corpus larger
+// than one SCAN page. Every document must come back exactly once, whatever the page
+// size or the number of pages, and the ids must be the full set that was written.
+func (suite *RedisTestSuite) TestScanScoresMultiplePages() {
+	const numScores = 2500
+	timestamp := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
+	written := make([]Score, 0, numScores)
+	for i := range numScores {
+		written = append(written, Score{
+			Id:         strconv.Itoa(i),
+			Score:      float64(i),
+			Categories: []string{"a"},
+			Timestamp:  timestamp,
+		})
+	}
+	ctx := suite.T().Context()
+	suite.NoError(suite.AddScores(ctx, "collection", "subset", written))
+
+	seen := make(map[string]bool, numScores)
+	scanned := 0
+	err := suite.ScanScores(ctx, func(collection, id, subset string, t time.Time) error {
+		scanned++
+		seen[id] = true
+		suite.Equal("collection", collection)
+		suite.Equal("subset", subset)
+		suite.Equal(timestamp, t.UTC())
+		return nil
+	})
+	suite.NoError(err)
+	// No duplicates: a document returned twice would make scanned exceed the set size.
+	suite.Equal(numScores, scanned)
+	suite.Equal(numScores, len(seen))
+	for i := range numScores {
+		suite.True(seen[strconv.Itoa(i)], "missing document %d", i)
+	}
+}
+
 func (suite *RedisTestSuite) TestUpdateScoresWithPagination() {
 	ctx := suite.T().Context()
 	db, ok := suite.Database.(*Redis)
@@ -339,6 +376,8 @@ func TestRedisGetScoresRespectsDeadlineAfterRequest(t *testing.T) {
 	})
 	defer client.Close()
 	database := &Redis{TablePrefix: "gorse_", client: client}
+	timeout := time.NewTimer(time.Second)
+	defer timeout.Stop()
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
 	result := make(chan error, 1)
@@ -351,7 +390,7 @@ func TestRedisGetScoresRespectsDeadlineAfterRequest(t *testing.T) {
 	case <-requestReceived:
 	case err := <-serverResult:
 		t.Fatalf("fake redis failed before receiving HMGET: %v", err)
-	case <-time.After(time.Second):
+	case <-timeout.C:
 		t.Fatal("HMGET was not sent")
 	}
 	select {
@@ -359,8 +398,13 @@ func TestRedisGetScoresRespectsDeadlineAfterRequest(t *testing.T) {
 		var timeoutError net.Error
 		assert.ErrorAs(t, err, &timeoutError)
 		assert.True(t, timeoutError.Timeout())
+		select {
+		case <-ctx.Done():
+		case <-timeout.C:
+			t.Fatal("context deadline was not propagated")
+		}
 		assert.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
-	case <-time.After(time.Second):
+	case <-timeout.C:
 		t.Fatal("GetScores ignored the context deadline after sending HMGET")
 	}
 }

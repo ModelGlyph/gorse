@@ -290,7 +290,7 @@ func (db *Weaviate) AddVectors(ctx context.Context, collection string, vectors [
 				weaviatePayloadHiddenKey:     vector.IsHidden,
 				weaviatePayloadTimestampKey:  vector.Timestamp,
 			},
-			Vector: models.C11yVector(vector.Values),
+			Vector: models.C11yVector(vector.Float32Values()),
 		})
 	}
 	_, err := db.client.Batch().ObjectsBatcher().WithObjects(objects...).Do(ctx)
@@ -397,7 +397,7 @@ func (db *Weaviate) QueryVectors(ctx context.Context, collection string, q Vecto
 		{Name: "_additional", Fields: []graphql.Field{{Name: "distance"}}},
 	}
 
-	explore := db.client.GraphQL().NearVectorArgBuilder().WithVector(q.Values)
+	explore := db.client.GraphQL().NearVectorArgBuilder().WithVector(q.Float32Values())
 	builder := db.client.GraphQL().Get().
 		WithClassName(capitalize(collection)).
 		WithFields(fields...).
@@ -443,12 +443,10 @@ func (db *Weaviate) QueryVectors(ctx context.Context, collection string, q Vecto
 		additional := m["_additional"].(map[string]any)
 		distance := additional["distance"].(float64)
 		results = append(results, ScoredVector{
-			Vector: Vector{
-				Id:         id,
-				IsHidden:   m[weaviatePayloadHiddenKey].(bool),
-				Categories: cats,
-			},
-			Score: -float32(distance),
+			Id:         id,
+			IsHidden:   m[weaviatePayloadHiddenKey].(bool),
+			Categories: cats,
+			Score:      -float32(distance),
 		})
 	}
 	return results, nil

@@ -24,7 +24,7 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/gorse-io/gorse/common/bfloats"
+	"github.com/gorse-io/gorse/common/floats"
 	"github.com/gorse-io/gorse/common/jsonutil"
 	"github.com/gorse-io/gorse/common/util"
 	"github.com/gorse-io/gorse/dataset"
@@ -89,6 +89,23 @@ type Embedding struct {
 	Value []uint16
 }
 
+// ConvertEmbeddingLabels replaces embedding vectors with FP16 slices in place,
+// preserving all other labels. Existing FP16 slices are reused. The returned
+// labels and embeddings extracted from them share values and must stay immutable.
+func ConvertEmbeddingLabels(o any) any {
+	switch labels := o.(type) {
+	case map[string]any:
+		for key, value := range labels {
+			labels[key] = ConvertEmbeddingLabels(value)
+		}
+	case []any, []float32, []float64:
+		if embeddings := ConvertEmbeddings(o); len(embeddings) == 1 {
+			return embeddings[0].Value
+		}
+	}
+	return o
+}
+
 func ConvertEmbeddings(o any) []Embedding {
 	embeddings := make([]Embedding, 0)
 	return convertEmbeddings(embeddings, "", o)
@@ -119,17 +136,17 @@ func convertEmbeddings(result []Embedding, prefix string, o any) []Embedding {
 		}
 		result = append(result, Embedding{
 			Name:  prefix,
-			Value: bfloats.FromFloat32(value),
+			Value: floats.FromFloat32(value),
 		})
 	case []float64:
 		result = append(result, Embedding{
 			Name:  prefix,
-			Value: bfloats.FromFloat32(lo.Map(embeddings, func(f float64, _ int) float32 { return float32(f) })),
+			Value: floats.FromFloat32(lo.Map(embeddings, func(f float64, _ int) float32 { return float32(f) })),
 		})
 	case []float32:
 		result = append(result, Embedding{
 			Name:  prefix,
-			Value: bfloats.FromFloat32(embeddings),
+			Value: floats.FromFloat32(embeddings),
 		})
 	case []uint16:
 		result = append(result, Embedding{
@@ -158,7 +175,7 @@ type Dataset struct {
 	Items                  []int32
 	Target                 []float32
 	Timestamps             []time.Time
-	ItemEmbeddings         [][][]uint16 // Index by row id, embedding id, embedding dimension; stored as BF16 bits
+	ItemEmbeddings         [][][]uint16 // Index by row id, embedding id, embedding dimension; stored as FP16 bits
 	ItemEmbeddingDimension []int
 	ItemEmbeddingIndex     *dataset.Index
 	PositiveCount          int

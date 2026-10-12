@@ -267,7 +267,10 @@ func (suite *baseTestSuite) TestDocument() {
 	suite.NoError(err)
 	documents, err = suite.GetScores(ctx, "visibility", "", []string{"item"})
 	suite.NoError(err)
-	suite.Equal([]Score{{Id: "item", Score: 20, Timestamp: ts.Add(time.Millisecond)}}, documents)
+	suite.Require().Len(documents, 1)
+	suite.Empty(documents[0].Categories)
+	documents[0].Categories = nil
+	suite.Equal(Score{Id: "item", Score: 20, Timestamp: ts.Add(time.Millisecond)}, documents[0])
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
 	_, err = suite.GetScores(canceled, "a", "", []string{"2"})
@@ -449,6 +452,52 @@ func (suite *baseTestSuite) TestSubsetDocument() {
 	suite.NoError(err)
 	suite.Len(documents, 1)
 	suite.Equal("2", documents[0].Id)
+}
+
+func (suite *baseTestSuite) TestUpdateScoresSubsetIsolation() {
+	ctx := suite.T().Context()
+	timestamp := time.Date(2026, 10, 12, 1, 2, 3, 0, time.UTC)
+	collections := []string{"scope-a", "scope-b", "outside"}
+	subsets := []string{"", "selected", "other"}
+	for _, collection := range collections {
+		for _, subset := range subsets {
+			suite.NoError(suite.AddScores(ctx, collection, subset, []Score{{
+				Id: "shared", Score: 1, Categories: []string{"work"}, Timestamp: timestamp,
+			}}))
+		}
+	}
+	tests := []struct {
+		name       string
+		subset     *string
+		score      float64
+		wantScores map[string]float64
+	}{
+		{name: "default", subset: new(""), score: 2, wantScores: map[string]float64{"": 2, "selected": 1, "other": 1}},
+		{name: "selected", subset: new("selected"), score: 3, wantScores: map[string]float64{"": 2, "selected": 3, "other": 1}},
+		{name: "all", score: 4, wantScores: map[string]float64{"": 4, "selected": 4, "other": 4}},
+	}
+	for _, test := range tests {
+		suite.Run(test.name, func() {
+			suite.NoError(suite.UpdateScores(ctx, collections[:2], test.subset, "shared", ScorePatch{Score: new(test.score)}))
+			for _, collection := range collections {
+				for _, subset := range subsets {
+					documents, err := suite.GetScores(ctx, collection, subset, []string{"shared"})
+					suite.NoError(err)
+					wantScore := test.wantScores[subset]
+					if collection == "outside" {
+						wantScore = 1
+					}
+					suite.Equal([]Score{{Id: "shared", Score: wantScore, Categories: []string{"work"}, Timestamp: timestamp}}, documents)
+				}
+			}
+		})
+	}
+	suite.NoError(suite.UpdateScores(ctx, collections[:2], new(""), "missing", ScorePatch{Score: new(float64(5))}))
+	for _, collection := range collections {
+		documents, err := suite.GetScores(ctx, collection, "", []string{"missing"})
+		suite.NoError(err)
+		suite.Empty(documents)
+	}
 }
 
 func (suite *baseTestSuite) TestScanScores() {

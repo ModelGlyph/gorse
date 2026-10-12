@@ -904,9 +904,6 @@ func (config *Config) Validate() error {
 			storage.MySQLPrefix,
 			storage.PostgresPrefix,
 			storage.PostgreSQLPrefix,
-			storage.ClickhousePrefix,
-			storage.CHHTTPPrefix,
-			storage.CHHTTPSPrefix,
 			storage.SQLitePrefix,
 		}
 		for _, prefix := range prefixes {
